@@ -49,16 +49,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import com.wolfeleo2.thingy.BuildConfig
+import com.wolfeleo2.thingy.data.AppUpdate
 import com.wolfeleo2.thingy.data.AuthRepository
 import com.wolfeleo2.thingy.data.ColorSource
-import com.wolfeleo2.thingy.data.SpacesLayout
 import com.wolfeleo2.thingy.data.Embedder
 import com.wolfeleo2.thingy.data.ItemRepository
 import com.wolfeleo2.thingy.data.SettingsRepository
 import com.wolfeleo2.thingy.data.SpaceRepository
+import com.wolfeleo2.thingy.data.SpacesLayout
+import com.wolfeleo2.thingy.data.UpdateChecker
 import com.wolfeleo2.thingy.ui.theme.dynamicColorSupported
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -88,6 +94,16 @@ fun SettingsScreen(
     var dlTotal by remember { mutableLongStateOf(0L) }
     val items by remember { itemRepository.items() }.collectAsStateWithLifecycle(emptyList())
     val spaces by remember { spaceRepository.spaces() }.collectAsStateWithLifecycle(emptyList())
+    val context = LocalContext.current
+    val updateChecker = remember { UpdateChecker(context) }
+    var availableUpdate by remember { mutableStateOf<AppUpdate?>(null) }
+    var checkingUpdate by remember { mutableStateOf(false) }
+    var checkStatus by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        val update = runCatching { updateChecker.check(BuildConfig.VERSION_NAME) }.getOrNull()
+        if (update != null) availableUpdate = update
+    }
 
     Scaffold(
         topBar = {
@@ -194,8 +210,69 @@ fun SettingsScreen(
                 }
             }
 
+            // App & Update status card
+            Text("App & Updates", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 20.dp))
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Thingy v${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                        val statusText = when {
+                            availableUpdate != null -> "New update v${availableUpdate?.version} available!"
+                            checkingUpdate -> "Checking for updates…"
+                            checkStatus != null -> checkStatus!!
+                            else -> "App is up to date"
+                        }
+                        Text(
+                            statusText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (availableUpdate != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (availableUpdate != null) {
+                        Button(
+                            onClick = { /* UpdateSheet opens automatically when availableUpdate is non-null */ },
+                            shapes = expressiveButtonShapes()
+                        ) {
+                            Text("Update")
+                        }
+                    } else {
+                        OutlinedButton(
+                            enabled = !checkingUpdate,
+                            onClick = {
+                                scope.launch {
+                                    checkingUpdate = true
+                                    checkStatus = null
+                                    val res = runCatching { updateChecker.check(BuildConfig.VERSION_NAME) }.getOrNull()
+                                    checkingUpdate = false
+                                    if (res != null) {
+                                        availableUpdate = res
+                                    } else {
+                                        checkStatus = "Latest version installed"
+                                    }
+                                }
+                            },
+                            shapes = expressiveButtonShapes()
+                        ) {
+                            Text(if (checkingUpdate) "Checking…" else "Check")
+                        }
+                    }
+                }
+            }
+
             OutlinedButton(onClick = onSignOut, shapes = expressiveButtonShapes(), modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Sign out") }
         }
+    }
+
+    availableUpdate?.let { update ->
+        UpdateSheet(update = update, onDismiss = { availableUpdate = null })
     }
 }
 

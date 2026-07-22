@@ -274,6 +274,6 @@ fun AppRoot(
     }
 
     availableUpdate?.let { update ->
-        UpdateDialog(update = update, onDismiss = { availableUpdate = null })
+        UpdateSheet(update = update, onDismiss = { availableUpdate = null })
     }
 }
