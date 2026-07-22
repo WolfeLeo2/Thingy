@@ -2,4 +2,6 @@
 <paths>
     <!-- Collage share cards written to cacheDir/shared and handed out via FileProvider. -->
     <cache-path name="shared" path="shared/" />
+    <!-- Downloaded update APKs, handed to the system installer via FileProvider. -->
+    <cache-path name="updates" path="updates/" />
 </paths>
