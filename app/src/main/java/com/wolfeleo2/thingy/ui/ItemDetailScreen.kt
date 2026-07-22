@@ -228,19 +228,11 @@ fun ItemDetailScreen(
                         }
                     },
                     actions = {
-                        IconButton(onClick = { showSnooze = true }) {
-                            Icon(
-                                Icons.Filled.Alarm,
-                                if (snoozedAt != null) "Change reminder" else "Remind me later",
-                                tint = if (snoozedAt != null) MaterialTheme.colorScheme.primary else LocalContentColor.current,
-                            )
-                        }
                         Box {
                             IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "More") }
                             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                                 DropdownMenuItem(
-                                    text = { Text(if (snoozedAt != null) "Change reminder..." else "Remind me later...") },
-                                    leadingIcon = { Icon(Icons.Filled.Alarm, null) },
+                                    text = { Text(if (snoozedAt != null) "Change reminder" else "Remind me later") },
                                     onClick = { menu = false; showSnooze = true },
                                 )
                                 DropdownMenuItem(
@@ -249,7 +241,7 @@ fun ItemDetailScreen(
                                 )
                                 DropdownMenuItem(
                                     // Errors/destructive actions stay on the app's fixed default red.
-                                    text = { Text("Delete", color = androidx.compose.material3.MaterialTheme.colorScheme.error) },
+                                    text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
                                     onClick = { menu = false; confirmDelete = true },
                                 )
                             }
