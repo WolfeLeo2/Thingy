@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Thingy</string>
+    <!-- mapbox_access_token is generated at build time from local.properties (see app/build.gradle.kts) -->
+</resources>

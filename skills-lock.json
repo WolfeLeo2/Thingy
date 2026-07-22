@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "skills": {
+    "mapbox-android-patterns": {
+      "source": "mapbox/mapbox-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/mapbox-android-patterns/SKILL.md",
+      "computedHash": "bb6aa2b6e6d117281ea75bad68a18ab3acffff493c08fa19810898829b3512ad"
+    },
+    "mapbox-cartography": {
+      "source": "mapbox/mapbox-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/mapbox-cartography/SKILL.md",
+      "computedHash": "53601b0955c1d07c86f6e0408bf05c0dae5c52d69b038d47e382976b7377d88a"
+    },
+    "mapbox-data-visualization-patterns": {
+      "source": "mapbox/mapbox-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/mapbox-data-visualization-patterns/SKILL.md",
+      "computedHash": "e210b2da957db517c4e4a2e7db8c76c29e91e00d89ea7d75351bc2e3e948e03f"
+    },
+    "mapbox-flutter-patterns": {
+      "source": "mapbox/mapbox-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/mapbox-flutter-patterns/SKILL.md",
+      "computedHash": "f67df6d6160fc404b62b9b7888e40f0ec3f037e6d39358ad4f67751ba595696b"
+    },
+    "mapbox-google-maps-migration": {
+      "source": "mapbox/mapbox-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/mapbox-google-maps-migration/SKILL.md",
+      "computedHash": "686d49eaccc0f9d0a78f89173c9cbdecc6ab7a12fdbd5994b02e7a6b37197722"
+    },
+    "mapbox-ios-patterns": {
+      "source": "mapbox/mapbox-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/mapbox-ios-patterns/SKILL.md",
+      "computedHash": "dd2c8a6dabc922d233c89ce833a87455f3ee9ea376cf3421024f5187f37b3e78"
+    },
+    "mapbox-location-grounding": {
+      "source": "mapbox/mapbox-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/mapbox-location-grounding/SKILL.md",
+      "computedHash": "056d549a99df6fe891f5eaf17ab39c28df0ce484b83f1bdd7642ae13d598821c"
+    },
+    "mapbox-mcp-devkit-patterns": {
+      "source": "mapbox/mapbox-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/mapbox-mcp-devkit-patterns/SKILL.md",
+      "computedHash": "06cb980beb990ed8b92062a40a394f67ce1dcc991f91cea1ef2f5bb973f8e1a9"
+    },
+    "mapbox-mcp-runtime-patterns": {
+      "source": "mapbox/mapbox-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/mapbox-mcp-runtime-patterns/SKILL.md",
+      "computedHash": "1fd127a79a02894f4353fc109540ad7b6eb5a26730a1cfd6e5dd4e8e0cb2a560"
+    },
+    "mapbox-search-integration": {
+      "source": "mapbox/mapbox-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/mapbox-search-integration/SKILL.md",
+      "computedHash": "3e50654eb228ced02403a3bd37166bdec7f34ad1857f6abad6b31840c8376eb6"
+    },
+    "mapbox-search-patterns": {
+      "source": "mapbox/mapbox-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/mapbox-search-patterns/SKILL.md",
+      "computedHash": "c92de6e6f3338c75a6e71cfa9ca41ca79de9e4315b2e2807a44a524cc8a07ac4"
+    },
+    "mapbox-store-locator-patterns": {
+      "source": "mapbox/mapbox-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/mapbox-store-locator-patterns/SKILL.md",
+      "computedHash": "82dc82111a8f42fe84977c4574cc45352845eba6e8170a6965a4d86194682953"
+    },
+    "mapbox-style-patterns": {
+      "source": "mapbox/mapbox-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/mapbox-style-patterns/SKILL.md",
+      "computedHash": "ed8908002221a48262aa2811c9f8ba19bd884c155ba050cb5ea65abd9bc82641"
+    },
+    "mapbox-style-quality": {
+      "source": "mapbox/mapbox-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/mapbox-style-quality/SKILL.md",
+      "computedHash": "f15c2874eb42e857f831a20186879be33a3d41e8032f1d0ed32488d36f496950"
+    },
+    "mapbox-token-security": {
+      "source": "mapbox/mapbox-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/mapbox-token-security/SKILL.md",
+      "computedHash": "481ecb423634e19c0ee9bb3e0ed95901fac03ef6fee35e1654c25b5db3c7948a"
+    }
+  }
+}

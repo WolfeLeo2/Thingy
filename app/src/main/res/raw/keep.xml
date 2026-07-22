@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MainActivity resolves this google-services string by NAME via Resources.getIdentifier(), which
+  R8's resource shrinker can't trace. Without keeping it, shrinkResources strips it and Google
+  Sign-in breaks (serverClientId resolves to null → "sign-in isn't configured" on the login page).
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@string/default_web_client_id" />

@@ -1,0 +1,4 @@
+<resources>
+    <!-- Window chrome only; the app UI is Compose (MaterialExpressiveTheme). -->
+    <style name="Theme.Thingy" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

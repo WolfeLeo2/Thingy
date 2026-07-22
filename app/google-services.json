@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "179190850566",
+    "project_id": "thingy-by-leo",
+    "storage_bucket": "thingy-by-leo.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:179190850566:android:570cac0c6e95affeeecf87",
+        "android_client_info": {
+          "package_name": "com.wolfeleo2.thingy"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "179190850566-dsrb6rjqrc3imtq3kcp73nltv08bnbpo.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.wolfeleo2.thingy",
+            "certificate_hash": "3b81736abd9bcd2d8dc06ec42e48b9cc74c96833"
+          }
+        },
+        {
+          "client_id": "179190850566-t8it9l63u2cuicrq2gl98taffeqme111.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.wolfeleo2.thingy",
+            "certificate_hash": "a983557f2ffdb1d898ebaf9036e818be54087d1e"
+          }
+        },
+        {
+          "client_id": "179190850566-6q2l7i97jtucvojfr9sgfeitks4qfd70.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCksVbygtUhCwm-mWRLBSXJNQTwfQFsGn8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "179190850566-6q2l7i97jtucvojfr9sgfeitks4qfd70.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

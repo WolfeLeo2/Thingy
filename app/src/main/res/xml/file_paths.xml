@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Collage share cards written to cacheDir/shared and handed out via FileProvider. -->
+    <cache-path name="shared" path="shared/" />
+</paths>
