@@ -6,6 +6,10 @@ val localProperties = Properties().apply {
     if (file.exists()) file.inputStream().use { load(it) }
 }
 
+// Set by CI (see .github/workflows/release.yml) so a signed release build doesn't require the
+// Android Studio "Generate Signed Bundle/APK" wizard. Local dev keeps using that wizard as before.
+val ciKeystorePath: String? = System.getenv("KEYSTORE_PATH")
+
 plugins {
     alias(libs.plugins.android.application)
     id("org.jetbrains.kotlin.plugin.compose")
@@ -20,14 +24,29 @@ android {
         applicationId = "com.wolfeleo2.thingy"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        // Overridden by CI via -PVERSION_CODE/-PVERSION_NAME (see release.yml); local builds keep 1/1.0.
+        versionCode = (project.findProperty("VERSION_CODE") as String?)?.toIntOrNull() ?: 1
+        versionName = project.findProperty("VERSION_NAME") as String? ?: "1.0"
         ndk {
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
         }
-        resValue("string", "mapbox_access_token", localProperties.getProperty("MAPBOX_ACCESS_TOKEN", ""))
+        resValue(
+            "string", "mapbox_access_token",
+            localProperties.getProperty("MAPBOX_ACCESS_TOKEN")
+                ?: System.getenv("MAPBOX_ACCESS_TOKEN") ?: "",
+        )
     }
 
+    if (ciKeystorePath != null) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(ciKeystorePath)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
 
     buildTypes {
         release {
@@ -37,8 +56,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            // Signing is done via the Android Studio "Generate Signed APK/Bundle" wizard
-            // (thingy.jks / key0) — no signingConfig hardcoded here on purpose.
+            // Locally: signed via the Android Studio "Generate Signed APK/Bundle" wizard
+            // (thingy.jks / key0). In CI: signed via the config above, from secrets.
+            if (ciKeystorePath != null) signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {

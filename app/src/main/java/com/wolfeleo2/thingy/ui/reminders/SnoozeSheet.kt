@@ -85,19 +85,43 @@ fun SnoozeSheet(
     val haptics = LocalHapticFeedback.current
     var showCustomPicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
+    // Hoisted above both dialogs (not just the date-picker one) so the picked date survives
+    // into the time-picker step — see the bug note below.
+    val todayStartUtcMillis = remember {
+        Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+    }
+    val datePickerState = rememberDatePickerState(
+        initialSelectedDateMillis = System.currentTimeMillis(),
+        selectableDates = object : androidx.compose.material3.SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long) = utcTimeMillis >= todayStartUtcMillis
+        },
+    )
 
     val options = remember {
         listOf(
             SnoozeOption("Later Today (6 PM)", Icons.Filled.Schedule) {
-                Calendar.getInstance().apply {
+                val sixPm = Calendar.getInstance().apply {
                     set(Calendar.HOUR_OF_DAY, 18)
                     set(Calendar.MINUTE, 0)
                     set(Calendar.SECOND, 0)
                     set(Calendar.MILLISECOND, 0)
-                    if (before(Calendar.getInstance())) {
-                        add(Calendar.HOUR_OF_DAY, 4)
+                }
+                // 6 PM already passed today — try a 4h nudge, but if that's ALSO in the
+                // past (e.g. it's 11 PM), don't silently fire seconds from now: push to
+                // tomorrow morning instead.
+                if (sixPm.before(Calendar.getInstance())) {
+                    sixPm.add(Calendar.HOUR_OF_DAY, 4)
+                    if (sixPm.before(Calendar.getInstance())) {
+                        sixPm.apply {
+                            add(Calendar.DAY_OF_YEAR, 1)
+                            set(Calendar.HOUR_OF_DAY, 9)
+                            set(Calendar.MINUTE, 0)
+                        }
                     }
-                }.timeInMillis
+                }
+                sixPm.timeInMillis
             },
             SnoozeOption("Tomorrow (9 AM)", Icons.Filled.WbSunny) {
                 Calendar.getInstance().apply {
@@ -202,15 +226,17 @@ fun SnoozeSheet(
         }
     }
 
-    if (showCustomPicker) {
-        val datePickerState = rememberDatePickerState()
+    // NOTE: these two dialogs used to both live inside `if (showCustomPicker)`, and "Next"
+    // set showCustomPicker=false in the same click that set showTimePicker=true — so the time
+    // picker's own `if` block never got a chance to render (it was nested inside a condition
+    // that had just gone false). The custom-time flow silently died after "Next". Fixed by
+    // gating each dialog on its own flag and only clearing showCustomPicker when the whole
+    // custom flow ends (confirm or cancel), not on the date→time step transition.
+    if (showCustomPicker && !showTimePicker) {
         DatePickerDialog(
             onDismissRequest = { showCustomPicker = false },
             confirmButton = {
-                TextButton(onClick = {
-                    showCustomPicker = false
-                    showTimePicker = true
-                }) { Text("Next") }
+                TextButton(onClick = { showTimePicker = true }) { Text("Next") }
             },
             dismissButton = {
                 TextButton(onClick = { showCustomPicker = false }) { Text("Cancel") }
@@ -218,40 +244,43 @@ fun SnoozeSheet(
         ) {
             DatePicker(state = datePickerState)
         }
+    }
 
-        if (showTimePicker) {
-            val selectedDateMillis = datePickerState.selectedDateMillis ?: System.currentTimeMillis()
-            val timePickerState = rememberTimePickerState(initialHour = 9, initialMinute = 0)
+    if (showTimePicker) {
+        val selectedDateMillis = datePickerState.selectedDateMillis ?: System.currentTimeMillis()
+        val timePickerState = rememberTimePickerState(initialHour = 9, initialMinute = 0)
 
-            val cal = Calendar.getInstance().apply {
-                timeInMillis = selectedDateMillis
-                set(Calendar.HOUR_OF_DAY, timePickerState.hour)
-                set(Calendar.MINUTE, timePickerState.minute)
-                set(Calendar.SECOND, 0)
-                set(Calendar.MILLISECOND, 0)
-            }
-
-            AlertDialog(
-                onDismissRequest = { showTimePicker = false },
-                title = { Text("Select time") },
-                text = { TimePicker(state = timePickerState) },
-                confirmButton = {
-                    TextButton(onClick = {
-                        showTimePicker = false
-                        val targetTime = cal.timeInMillis
-                        ReminderManager.scheduleSnooze(context, item.id, item.displayTitle(), item.description, targetTime)
-                        scope.launch {
-                            settings.snoozeItem(item.id, targetTime)
-                            onSnoozed(targetTime)
-                            onDismiss()
-                        }
-                    }) { Text("Set Reminder") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showTimePicker = false }) { Text("Cancel") }
-                }
-            )
+        val cal = Calendar.getInstance().apply {
+            timeInMillis = selectedDateMillis
+            set(Calendar.HOUR_OF_DAY, timePickerState.hour)
+            set(Calendar.MINUTE, timePickerState.minute)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
         }
+
+        AlertDialog(
+            onDismissRequest = { showTimePicker = false; showCustomPicker = false },
+            title = { Text("Select time") },
+            text = { TimePicker(state = timePickerState) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showTimePicker = false
+                    showCustomPicker = false
+                    val targetTime = cal.timeInMillis
+                    ReminderManager.scheduleSnooze(context, item.id, item.displayTitle(), item.description, targetTime)
+                    scope.launch {
+                        settings.snoozeItem(item.id, targetTime)
+                        onSnoozed(targetTime)
+                        onDismiss()
+                    }
+                }) { Text("Set Reminder") }
+            },
+            dismissButton = {
+                // Cancel here exits the whole custom flow rather than bouncing back to the
+                // date step — going "back" instead of "cancel" would need its own affordance.
+                TextButton(onClick = { showTimePicker = false; showCustomPicker = false }) { Text("Cancel") }
+            }
+        )
     }
 }
 

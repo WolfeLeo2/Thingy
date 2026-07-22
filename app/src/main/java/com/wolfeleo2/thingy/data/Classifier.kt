@@ -10,6 +10,7 @@ import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.GenerativeBackend
 import com.google.firebase.ai.GenerativeModel
 import com.google.firebase.ai.type.Schema
+import com.google.firebase.ai.type.Tool
 import com.google.firebase.ai.type.content
 import com.google.firebase.ai.type.generationConfig
 
@@ -30,6 +31,7 @@ import org.jsoup.Jsoup
 import java.net.URI
 import java.net.URL
 import java.util.Collections
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Client-side AI (Firebase AI Logic / Gemini Developer API free tier). Ports Amber's
@@ -96,7 +98,7 @@ class Classifier(
                     return
                 }
                 Log.i("Thingy", "classify retry $attempt for ${item.id}: ${e.message}")
-                delay(2000L * attempt) // linear backoff — enough to clear a free-tier rate spike
+                delay((2000L * attempt).milliseconds) // linear backoff — enough to clear a free-tier rate spike
             }
         }
     }
@@ -301,7 +303,7 @@ class Classifier(
     ).joinToString("\n\n")
 
     private fun mediaPrompt(isVideo: Boolean, spacesBlock: String) = listOf(
-        "You are helping organize a save-it-for-later app. Analyze this saved ${if (isVideo) "video" else "image"} and produce a short evocative title, a 1-2 sentence description of what it shows, 4-8 lowercase tags (one or two words each), and matching space names.",
+        "You are helping organize a save-it-for-later app. Analyze(if needed, web search about it to get more accurate results) this saved ${if (isVideo) "video" else "image"} and produce a short evocative title, a 1-2 sentence description of what it shows, 4-8 lowercase tags (one or two words each), and matching space names.",
         "CRITICAL: If the media depicts a specific pop culture moment, a scene from a movie or TV series, a famous online place/game, a recognizable person, or a specific historical/sports event (e.g. 'Messi playing France in the 2022 World Cup', or 'The black hole scene from Interstellar'), explicitly identify and name the movie, series, people, and context in both the title and the description.",
         spacesBlock,
         INTENTS_PROMPT_BLOCK,
@@ -371,7 +373,7 @@ class Classifier(
         // User-selected; Amber's model. GA/available on the free tier.
         // Vertex AI backend — bills via Blaze (no $25 prepayment) + $300 credit eligible.
         // Vertex model id (not the Developer-API "gemini-3.1-flash-lite"). Bump if you want newer.
-        const val MODEL = "gemini-3.1-flash-lite"
+        const val MODEL = "gemini-3.5-flash-lite"
         const val MAX_CONCURRENT = 2   // free-tier-friendly concurrency cap for classification
         const val MAX_ATTEMPTS = 3     // retries before a transient failure becomes `failed`
         const val UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"

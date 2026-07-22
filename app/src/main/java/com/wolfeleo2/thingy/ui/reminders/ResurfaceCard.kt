@@ -170,7 +170,7 @@ fun ResurfaceCard(
                 }
                 Spacer(Modifier.width(6.dp))
                 OutlinedButton(onClick = onSnooze, shapes = expressiveButtonShapes()) {
-                    Text("Snooze")
+                    Text("Remind me later")
                 }
                 Spacer(Modifier.width(6.dp))
                 Button(

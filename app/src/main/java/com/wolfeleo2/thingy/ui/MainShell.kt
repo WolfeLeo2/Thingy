@@ -65,6 +65,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.media3.common.util.UnstableApi
 import com.wolfeleo2.thingy.data.Embedder
 import com.wolfeleo2.thingy.data.ImageIngestor
 import com.wolfeleo2.thingy.data.Item
@@ -90,6 +91,7 @@ private enum class Tab(val label: String, val icon: ImageVector) {
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
+@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable
 fun MainShell(
     itemRepository: ItemRepository,

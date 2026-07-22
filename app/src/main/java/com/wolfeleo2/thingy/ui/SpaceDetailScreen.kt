@@ -56,6 +56,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.media3.common.util.UnstableApi
 import com.wolfeleo2.thingy.data.Classifier
 import com.wolfeleo2.thingy.data.ImageIngestor
 import com.wolfeleo2.thingy.data.ItemRepository
@@ -67,6 +68,7 @@ import com.wolfeleo2.thingy.ui.share.CollageShareSheet
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
+@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable
 fun SpaceDetailScreen(
     spaceId: String,

@@ -7,6 +7,7 @@ import android.util.Log
 import android.widget.Toast
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.Presentation
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItem
@@ -32,6 +33,7 @@ import java.util.UUID
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+@UnstableApi
 class VideoIngestor(
     private val context: Context,
     private val items: ItemRepository = ItemRepository(),
