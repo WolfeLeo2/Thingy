@@ -42,7 +42,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.wolfeleo2.thingy.data.AppUpdate
 import com.wolfeleo2.thingy.data.UpdateChecker
@@ -123,12 +127,10 @@ fun UpdateSheet(
                         color = MaterialTheme.colorScheme.primary
                     )
                     Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = update.notes.ifBlank { "Performance improvements and bug fixes." },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
+                    MarkdownText(
+                        markdown = update.notes.ifBlank { "Performance improvements and bug fixes." },
                         modifier = Modifier
-                            .heightIn(max = 180.dp)
+                            .heightIn(max = 200.dp)
                             .verticalScroll(rememberScrollState())
                     )
                 }
@@ -197,6 +199,89 @@ fun UpdateSheet(
                     Text(if (downloading) "Downloading…" else "Install Update")
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun MarkdownText(
+    markdown: String,
+    modifier: Modifier = Modifier
+) {
+    val lines = remember(markdown) { markdown.lines() }
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        lines.forEach { line ->
+            val trimmed = line.trim()
+            when {
+                trimmed.startsWith("# ") -> {
+                    Text(
+                        text = parseInlineMarkdown(trimmed.removePrefix("# ")),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
+                    )
+                }
+                trimmed.startsWith("## ") -> {
+                    Text(
+                        text = parseInlineMarkdown(trimmed.removePrefix("## ")),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)
+                    )
+                }
+                trimmed.startsWith("### ") -> {
+                    Text(
+                        text = parseInlineMarkdown(trimmed.removePrefix("### ")),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+                trimmed.startsWith("- ") || trimmed.startsWith("* ") -> {
+                    Row(
+                        modifier = Modifier.padding(start = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Text("•", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                        Text(
+                            text = parseInlineMarkdown(trimmed.substring(2)),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+                trimmed.isEmpty() -> {
+                    Spacer(Modifier.height(4.dp))
+                }
+                else -> {
+                    Text(
+                        text = parseInlineMarkdown(trimmed),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun parseInlineMarkdown(text: String): AnnotatedString {
+    return buildAnnotatedString {
+        val regex = Regex("\\*\\*(.*?)\\*\\*")
+        var lastIndex = 0
+        regex.findAll(text).forEach { matchResult ->
+            append(text.substring(lastIndex, matchResult.range.first))
+            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                append(matchResult.groupValues[1])
+            }
+            lastIndex = matchResult.range.last + 1
+        }
+        if (lastIndex < text.length) {
+            append(text.substring(lastIndex))
         }
     }
 }
