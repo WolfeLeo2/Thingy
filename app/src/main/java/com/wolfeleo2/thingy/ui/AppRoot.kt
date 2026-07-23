@@ -14,9 +14,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import com.wolfeleo2.thingy.BuildConfig
-import com.wolfeleo2.thingy.data.AppUpdate
-import com.wolfeleo2.thingy.data.UpdateChecker
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -80,12 +77,6 @@ fun AppRoot(
     val videoIngestor = remember { VideoIngestor(appContext, itemRepository) }
     val cloudinaryMigration = remember { CloudinaryMigration() }
     val offlineSyncer = remember { OfflineImageSyncer(appContext) }
-
-    val updateChecker = remember { UpdateChecker(appContext) }
-    var availableUpdate by remember { mutableStateOf<AppUpdate?>(null) }
-    LaunchedEffect(Unit) {
-        availableUpdate = runCatching { updateChecker.check(BuildConfig.VERSION_NAME) }.getOrNull()
-    }
 
     val user by auth.authState.collectAsStateWithLifecycle(auth.currentUser)
     val onboardedFlow = remember(settings) { settings.onboardingComplete.map<Boolean, Boolean?> { it } }
@@ -271,9 +262,5 @@ fun AppRoot(
                 }
             },
         )
-    }
-
-    availableUpdate?.let { update ->
-        UpdateSheet(update = update, onDismiss = { availableUpdate = null })
     }
 }

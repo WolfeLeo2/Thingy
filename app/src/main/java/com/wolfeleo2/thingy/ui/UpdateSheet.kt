@@ -32,6 +32,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -66,6 +67,8 @@ fun UpdateSheet(
     var downloading by remember { mutableStateOf(false) }
     var downloadJob by remember { mutableStateOf<Job?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var dlBytes by remember { mutableLongStateOf(0L) }
+    var dlTotal by remember { mutableLongStateOf(0L) }
 
     ModalBottomSheet(
         onDismissRequest = { if (!downloading) onDismiss() },
@@ -138,9 +141,17 @@ fun UpdateSheet(
 
             if (downloading) {
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    if (dlTotal > 0) {
+                        LinearWavyProgressIndicator(
+                            progress = { (dlBytes.toFloat() / dlTotal).coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                    fun mb(b: Long) = "%.1f MB".format(b / 1_000_000.0)
                     Text(
-                        "Downloading update package…",
+                        if (dlTotal > 0) "Downloading — ${mb(dlBytes)} / ${mb(dlTotal)}" else "Downloading update package…",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.align(Alignment.CenterHorizontally)
@@ -181,9 +192,11 @@ fun UpdateSheet(
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                         downloading = true
                         error = null
+                        dlBytes = 0L
+                        dlTotal = 0L
                         downloadJob = scope.launch {
                             runCatching {
-                                val file = checker.download(update)
+                                val file = checker.download(update) { done, total -> dlBytes = done; dlTotal = total }
                                 checker.install(file)
                                 onDismiss()
                             }.onFailure {

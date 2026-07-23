@@ -47,16 +47,30 @@ class UpdateChecker(private val context: Context) {
         }.getOrNull()
     }
 
-    suspend fun download(update: AppUpdate): File = withContext(Dispatchers.IO) {
-        val dir = File(context.cacheDir, "updates").also { it.mkdirs() }
-        val file = File(dir, "thingy-${update.version}.apk")
-        val conn = URL(update.apkUrl).openConnection() as HttpURLConnection
-        conn.connectTimeout = 15_000
-        conn.readTimeout = 60_000
-        conn.instanceFollowRedirects = true
-        conn.inputStream.use { input -> file.outputStream().use { output -> input.copyTo(output) } }
-        file
-    }
+    suspend fun download(update: AppUpdate, onProgress: (bytesRead: Long, totalBytes: Long) -> Unit = { _, _ -> }): File =
+        withContext(Dispatchers.IO) {
+            val dir = File(context.cacheDir, "updates").also { it.mkdirs() }
+            val file = File(dir, "thingy-${update.version}.apk")
+            val conn = URL(update.apkUrl).openConnection() as HttpURLConnection
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 60_000
+            conn.instanceFollowRedirects = true
+            val total = conn.contentLengthLong
+            conn.inputStream.use { input ->
+                file.outputStream().use { output ->
+                    val buffer = ByteArray(8192)
+                    var bytesRead = 0L
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read == -1) break
+                        output.write(buffer, 0, read)
+                        bytesRead += read
+                        onProgress(bytesRead, total)
+                    }
+                }
+            }
+            file
+        }
 
     /** Fires the system installer for [apkFile], or routes to the "allow unknown sources" setting first. */
     fun install(apkFile: File) {
