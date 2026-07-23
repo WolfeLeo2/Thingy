@@ -353,23 +353,7 @@ class Classifier(
 
     /** Pinterest's oEmbed rejects pin.it links outright ("url should be a Pinterest url") —
      * it only accepts canonical pinterest.com/pin/<id> URLs, so follow the redirect first. */
-    private fun resolveRedirect(url: String): String = runCatching {
-        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-            instanceFollowRedirects = true
-            setRequestProperty("User-Agent", UA)
-            connectTimeout = 8_000
-            readTimeout = 8_000
-        }
-        conn.connect()
-        conn.url.toString()
-    }.getOrDefault(url)
-
-    private val PINTEREST_PIN_ID = Regex("/pin/(\\d+)")
-
-    /** pin.it redirects to variants like /pin/<id>/sent/?invite_code=...&sender=... (share/invite
-     * links) which oEmbed also rejects ("Url was not found") — it only accepts the bare pin URL. */
-    private fun canonicalPinterestUrl(url: String): String =
-        PINTEREST_PIN_ID.find(url)?.let { "https://www.pinterest.com/pin/${it.groupValues[1]}/" } ?: url
+    private fun resolveRedirect(url: String): String = resolveRedirectFollowing308(url, UA)
 
     /** Tries a provider's official oEmbed endpoint before falling back to HTML/OG scraping — more
      * reliable for platforms that serve a consent wall or empty JS shell to a plain HTTP GET. */
@@ -590,4 +574,31 @@ class Classifier(
         val RECOMMEND_SCHEMA: Schema = Schema.obj(mapOf("itemNumbers" to Schema.array(Schema.integer())))
         val STEER_SCHEMA: Schema = Schema.obj(mapOf("intents" to Schema.array(INTENT_SCHEMA)))
     }
+}
+
+private val PINTEREST_PIN_ID = Regex("/pin/(\\d+)")
+
+/** pin.it redirects to variants like /pin/<id>/sent/?invite_code=...&sender=... (share/invite
+ * links) which Pinterest's oEmbed rejects ("Url was not found") — it only accepts the bare pin URL. */
+internal fun canonicalPinterestUrl(url: String): String =
+    PINTEREST_PIN_ID.find(url)?.let { "https://www.pinterest.com/pin/${it.groupValues[1]}/" } ?: url
+
+/** HttpURLConnection.instanceFollowRedirects only auto-follows 301/302/303 — pin.it responds with
+ * 308, which it silently ignores (getURL() stays on the original link) — so follow by hand. */
+internal fun resolveRedirectFollowing308(url: String, userAgent: String): String {
+    var current = url
+    repeat(5) {
+        val location = runCatching {
+            val conn = (URL(current).openConnection() as HttpURLConnection).apply {
+                instanceFollowRedirects = false
+                setRequestProperty("User-Agent", userAgent)
+                connectTimeout = 8_000
+                readTimeout = 8_000
+            }
+            val code = conn.responseCode
+            if (code in 300..399) conn.getHeaderField("Location") else null
+        }.getOrNull() ?: return current
+        current = URL(URL(current), location).toString()
+    }
+    return current
 }

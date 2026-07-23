@@ -153,4 +153,6 @@ dependencies {
     implementation(libs.googleid)
 
     debugImplementation(libs.compose.ui.tooling)
+
+    testImplementation(libs.junit)
 }
