@@ -351,14 +351,28 @@ class Classifier(
 
     private fun encode(s: String): String = URLEncoder.encode(s, "UTF-8")
 
+    /** Pinterest's oEmbed rejects pin.it links outright ("url should be a Pinterest url") —
+     * it only accepts canonical pinterest.com/pin/<id> URLs, so follow the redirect first. */
+    private fun resolveRedirect(url: String): String = runCatching {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", UA)
+            connectTimeout = 8_000
+            readTimeout = 8_000
+        }
+        conn.connect()
+        conn.url.toString()
+    }.getOrDefault(url)
+
     /** Tries a provider's official oEmbed endpoint before falling back to HTML/OG scraping — more
      * reliable for platforms that serve a consent wall or empty JS shell to a plain HTTP GET. */
     private suspend fun fetchOEmbed(url: String): OEmbed? = withContext(Dispatchers.IO) {
         val host = runCatching { URI(url).host?.removePrefix("www.")?.lowercase() }.getOrNull() ?: return@withContext null
         val endpointFor = OEMBED_ENDPOINTS.firstOrNull { (hosts, _) -> hosts.any { host == it || host.endsWith(".$it") } }
             ?.second ?: return@withContext null
+        val resolvedUrl = if (host == "pin.it") resolveRedirect(url) else url
         runCatching {
-            val conn = URL(endpointFor(url)).openConnection() as HttpURLConnection
+            val conn = URL(endpointFor(resolvedUrl)).openConnection() as HttpURLConnection
             conn.setRequestProperty("Accept", "application/json")
             conn.setRequestProperty("User-Agent", UA)
             conn.connectTimeout = 10_000
