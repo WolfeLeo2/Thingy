@@ -79,7 +79,7 @@ fun AddSheet(
                     when (m) {
                         Mode.MENU -> "Save something"
                         Mode.NOTE -> "New note"
-                        Mode.ARTICLE -> "Save an article"
+                        Mode.ARTICLE -> "Save an link"
                     },
                     style = MaterialTheme.typography.headlineSmall,
                 )
@@ -89,10 +89,10 @@ fun AddSheet(
                 Mode.MENU -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         AddAction(Icons.AutoMirrored.Filled.Note, "Note", Modifier.weight(1f)) { mode = Mode.NOTE }
-                        AddAction(Icons.Filled.Link, "Article", Modifier.weight(1f)) { mode = Mode.ARTICLE }
+                        AddAction(Icons.Filled.Link, "Link", Modifier.weight(1f)) { mode = Mode.ARTICLE }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        AddAction(Icons.Filled.PhotoLibrary, "Photos", Modifier.weight(1f)) {
+                        AddAction(Icons.Filled.PhotoLibrary, "Media", Modifier.weight(1f)) {
                             photosLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
                         }
                         AddAction(Icons.Filled.CameraAlt, "Camera", Modifier.weight(1f)) { onOpenCamera(); onDismiss() }

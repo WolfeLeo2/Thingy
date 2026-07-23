@@ -67,19 +67,31 @@ class UpdateChecker(private val context: Context) {
                         bytesRead += read
                         onProgress(bytesRead, total)
                     }
+                    // A connection that drops mid-stream can still return EOF cleanly, silently
+                    // truncating the file — that's what the installer later reports as "There was
+                    // a problem parsing this package." Catch it here as a retryable download error.
+                    if (total > 0 && bytesRead != total) {
+                        throw java.io.IOException("Incomplete download: got $bytesRead of $total bytes")
+                    }
                 }
             }
             file
         }
 
-    /** Fires the system installer for [apkFile], or routes to the "allow unknown sources" setting first. */
-    fun install(apkFile: File) {
-        if (!context.packageManager.canRequestPackageInstalls()) {
+    fun canInstallPackages(): Boolean = context.packageManager.canRequestPackageInstalls()
+
+    /**
+     * Fires the system installer for [apkFile], or routes to the "allow unknown sources" setting
+     * first. Returns true iff the installer was actually launched — false means the caller should
+     * hold onto [apkFile] and retry once the user grants the permission and returns to the app.
+     */
+    fun install(apkFile: File): Boolean {
+        if (!canInstallPackages()) {
             context.startActivity(
                 Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )
-            return
+            return false
         }
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apkFile)
         context.startActivity(
@@ -88,6 +100,7 @@ class UpdateChecker(private val context: Context) {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
             },
         )
+        return true
     }
 }
 

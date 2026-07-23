@@ -31,6 +31,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -43,6 +44,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import java.io.File
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
@@ -96,6 +101,24 @@ fun UpdateSheet(
     var error by remember { mutableStateOf<String?>(null) }
     var dlBytes by remember { mutableLongStateOf(0L) }
     var dlTotal by remember { mutableLongStateOf(0L) }
+    // Set once the APK is fully downloaded but install() had to redirect to the "allow unknown
+    // sources" setting — resumed from ON_RESUME below instead of forcing a full redownload.
+    var pendingInstallFile by remember { mutableStateOf<File?>(null) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val file = pendingInstallFile
+                if (file != null && checker.canInstallPackages()) {
+                    pendingInstallFile = null
+                    if (checker.install(file)) onDismiss()
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     ModalBottomSheet(
         onDismissRequest = { if (!downloading) onDismiss() },
@@ -224,8 +247,13 @@ fun UpdateSheet(
                         downloadJob = scope.launch {
                             runCatching {
                                 val file = checker.download(update) { done, total -> dlBytes = done; dlTotal = total }
-                                checker.install(file)
-                                onDismiss()
+                                if (checker.install(file)) {
+                                    onDismiss()
+                                } else {
+                                    // Redirected to the "allow unknown sources" setting — resume
+                                    // the install from the already-downloaded file on ON_RESUME.
+                                    pendingInstallFile = file
+                                }
                             }.onFailure {
                                 error = "Download failed: ${it.message}"
                             }

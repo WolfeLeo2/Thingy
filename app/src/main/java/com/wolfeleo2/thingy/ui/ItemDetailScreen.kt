@@ -53,6 +53,7 @@ import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
 import androidx.compose.material3.carousel.rememberCarouselState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.DropdownMenu
@@ -523,7 +524,7 @@ private fun ProductLinks(item: Item, onFindLinks: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                CircularWavyProgressIndicator(Modifier.size(22.dp))
+                CircularProgressIndicator(Modifier.size(22.dp))
                 Text("Finding shopping links…", style = MaterialTheme.typography.bodyMedium)
             }
             products.isNotEmpty() -> {
@@ -596,7 +597,7 @@ private fun MoreLikeThis(similar: List<Item>, onOpenItem: (List<String>, Int) ->
         val carouselState = rememberCarouselState { similar.size }
         HorizontalMultiBrowseCarousel(
             state = carouselState,
-            preferredItemWidth = 130.dp,
+            preferredItemWidth = 150.dp,
             itemSpacing = 8.dp,
             modifier = Modifier
                 .fillMaxWidth()

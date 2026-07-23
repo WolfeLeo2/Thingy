@@ -29,8 +29,10 @@ import net.dankito.readability4j.Readability4J
 import org.json.JSONArray
 import org.json.JSONObject
 import org.jsoup.Jsoup
+import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
+import java.net.URLEncoder
 import java.util.Collections
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -330,7 +332,63 @@ class Classifier(
         val siteName: String?, val content: String?, val aspectRatio: Double?,
     )
 
+    private data class OEmbed(
+        val title: String?, val thumbnailUrl: String?, val providerName: String?,
+        val authorName: String?, val aspectRatio: Double?,
+    )
+
+    // Official, keyless oEmbed endpoints for platforms whose normal pages are consent-walled or
+    // JS-shell SPAs that plain HTML/OG scraping handles poorly. Matched by exact-or-subdomain host.
+    private val OEMBED_ENDPOINTS: List<Pair<Set<String>, (String) -> String>> = listOf(
+        setOf("youtube.com", "youtu.be") to { u -> "https://www.youtube.com/oembed?format=json&url=${encode(u)}" },
+        setOf("open.spotify.com") to { u -> "https://open.spotify.com/oembed?url=${encode(u)}" },
+        setOf("pinterest.com", "pin.it") to { u -> "https://www.pinterest.com/oembed.json?url=${encode(u)}" },
+        setOf("tiktok.com") to { u -> "https://www.tiktok.com/oembed?url=${encode(u)}" },
+        setOf("soundcloud.com") to { u -> "https://soundcloud.com/oembed?format=json&url=${encode(u)}" },
+        setOf("vimeo.com") to { u -> "https://vimeo.com/api/oembed.json?url=${encode(u)}" },
+        setOf("twitter.com", "x.com") to { u -> "https://publish.twitter.com/oembed?url=${encode(u)}" },
+    )
+
+    private fun encode(s: String): String = URLEncoder.encode(s, "UTF-8")
+
+    /** Tries a provider's official oEmbed endpoint before falling back to HTML/OG scraping — more
+     * reliable for platforms that serve a consent wall or empty JS shell to a plain HTTP GET. */
+    private suspend fun fetchOEmbed(url: String): OEmbed? = withContext(Dispatchers.IO) {
+        val host = runCatching { URI(url).host?.removePrefix("www.")?.lowercase() }.getOrNull() ?: return@withContext null
+        val endpointFor = OEMBED_ENDPOINTS.firstOrNull { (hosts, _) -> hosts.any { host == it || host.endsWith(".$it") } }
+            ?.second ?: return@withContext null
+        runCatching {
+            val conn = URL(endpointFor(url)).openConnection() as HttpURLConnection
+            conn.setRequestProperty("Accept", "application/json")
+            conn.setRequestProperty("User-Agent", UA)
+            conn.connectTimeout = 10_000
+            conn.readTimeout = 10_000
+            if (conn.responseCode !in 200..299) return@runCatching null
+            val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+            val w = json.optDouble("thumbnail_width", Double.NaN)
+            val h = json.optDouble("thumbnail_height", Double.NaN)
+            OEmbed(
+                title = json.optString("title").ifBlank { null },
+                thumbnailUrl = json.optString("thumbnail_url").ifBlank { null },
+                providerName = json.optString("provider_name").ifBlank { null },
+                authorName = json.optString("author_name").ifBlank { null },
+                aspectRatio = if (!w.isNaN() && !h.isNaN() && w > 0 && h > 0) w / h else null,
+            )
+        }.getOrNull()
+    }
+
     private suspend fun fetchPage(url: String): Page = withContext(Dispatchers.IO) {
+        fetchOEmbed(url)?.let { oe ->
+            return@withContext Page(
+                title = oe.title,
+                description = oe.authorName?.let { "By $it" } ?: oe.providerName,
+                heroImageUrl = oe.thumbnailUrl,
+                siteName = oe.providerName,
+                content = listOfNotNull(oe.providerName, oe.title, oe.authorName?.let { "by $it" })
+                    .joinToString(" — ").ifBlank { null },
+                aspectRatio = oe.aspectRatio,
+            )
+        }
         val resp = Jsoup.connect(url).userAgent(UA).timeout(15000).followRedirects(true).execute()
         val finalUrl = resp.url().toString()
         val html = resp.body()
