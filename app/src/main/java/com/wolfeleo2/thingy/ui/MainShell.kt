@@ -47,6 +47,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -94,6 +95,7 @@ private enum class Tab(val label: String, val icon: ImageVector) {
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable
 fun MainShell(
+    userId: String?,
     itemRepository: ItemRepository,
     spaceRepository: SpaceRepository,
     classifier: com.wolfeleo2.thingy.data.Classifier,
@@ -118,7 +120,9 @@ fun MainShell(
     var sharingSpace by remember { mutableStateOf<com.wolfeleo2.thingy.data.Space?>(null) }
     var addingToSpaceId by remember { mutableStateOf<String?>(null) }
     val stateHolder = rememberSaveableStateHolder()
-    val library: LibraryViewModel = viewModel { LibraryViewModel() }
+    // Keyed by uid so a sign-out/sign-in swap gets a fresh ViewModel instead of briefly showing
+    // the previous account's stale spaceSuggestions/items before the new Firestore snapshot lands.
+    val library: LibraryViewModel = key(userId) { viewModel { LibraryViewModel() } }
     // Collected here (not inside the Spaces tab branch) so the DataStore read warms up in the
     // background from first composition — avoids a GRID-then-SHELF flash on first tab switch.
     val spacesLayout by settings.spacesLayout.collectAsStateWithLifecycle(SpacesLayout.GRID)

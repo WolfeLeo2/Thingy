@@ -43,16 +43,43 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.wolfeleo2.thingy.data.AppUpdate
 import com.wolfeleo2.thingy.data.UpdateChecker
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import org.commonmark.node.BlockQuote
+import org.commonmark.node.BulletList
+import org.commonmark.node.Code
+import org.commonmark.node.Emphasis
+import org.commonmark.node.FencedCodeBlock
+import org.commonmark.node.Heading
+import org.commonmark.node.HardLineBreak
+import org.commonmark.node.IndentedCodeBlock
+import org.commonmark.node.Link
+import org.commonmark.node.ListItem
+import org.commonmark.node.Node
+import org.commonmark.node.OrderedList
+import org.commonmark.node.Paragraph
+import org.commonmark.node.SoftLineBreak
+import org.commonmark.node.StrongEmphasis
+import org.commonmark.node.Text as CmText
+import org.commonmark.parser.Parser
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -221,80 +248,212 @@ fun MarkdownText(
     markdown: String,
     modifier: Modifier = Modifier
 ) {
-    val lines = remember(markdown) { markdown.lines() }
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        lines.forEach { line ->
-            val trimmed = line.trim()
-            when {
-                trimmed.startsWith("# ") -> {
-                    Text(
-                        text = parseInlineMarkdown(trimmed.removePrefix("# ")),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
-                    )
+    val document = remember(markdown) {
+        val parser = Parser.builder().build()
+        parser.parse(markdown)
+    }
+
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val linkColor = MaterialTheme.colorScheme.primary
+    val onSurface = MaterialTheme.colorScheme.onSurface
+    val codeBg = MaterialTheme.colorScheme.surfaceContainerHigh
+
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        var node = document.firstChild
+        while (node != null) {
+            RenderBlockNode(node, primaryColor, linkColor, onSurface, codeBg)
+            node = node.next
+        }
+    }
+}
+
+@Composable
+private fun RenderBlockNode(
+    node: Node,
+    primaryColor: Color,
+    linkColor: Color,
+    onSurface: Color,
+    codeBg: Color
+) {
+    when (node) {
+        is Heading -> {
+            val style = when (node.level) {
+                1 -> MaterialTheme.typography.titleLarge
+                2 -> MaterialTheme.typography.titleMedium
+                else -> MaterialTheme.typography.titleSmall
+            }
+            Text(
+                text = buildInlineMarkdown(node, linkColor, codeBg),
+                style = style,
+                fontWeight = FontWeight.Bold,
+                color = primaryColor,
+                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+            )
+        }
+        is Paragraph -> {
+            Text(
+                text = buildInlineMarkdown(node, linkColor, codeBg),
+                style = MaterialTheme.typography.bodyMedium,
+                color = onSurface
+            )
+        }
+        is BulletList -> {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(start = 8.dp)) {
+                var item = node.firstChild
+                while (item != null) {
+                    if (item is ListItem) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Text("•", style = MaterialTheme.typography.bodyMedium, color = primaryColor)
+                            Column {
+                                var child = item.firstChild
+                                while (child != null) {
+                                    RenderBlockNode(child, primaryColor, linkColor, onSurface, codeBg)
+                                    child = child.next
+                                }
+                            }
+                        }
+                    }
+                    item = item.next
                 }
-                trimmed.startsWith("## ") -> {
-                    Text(
-                        text = parseInlineMarkdown(trimmed.removePrefix("## ")),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)
-                    )
+            }
+        }
+        is OrderedList -> {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(start = 8.dp)) {
+                var item = node.firstChild
+                var index = node.startNumber
+                while (item != null) {
+                    if (item is ListItem) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Text("$index.", style = MaterialTheme.typography.bodyMedium, color = primaryColor, fontWeight = FontWeight.Bold)
+                            Column {
+                                var child = item.firstChild
+                                while (child != null) {
+                                    RenderBlockNode(child, primaryColor, linkColor, onSurface, codeBg)
+                                    child = child.next
+                                }
+                            }
+                        }
+                        index++
+                    }
+                    item = item.next
                 }
-                trimmed.startsWith("### ") -> {
-                    Text(
-                        text = parseInlineMarkdown(trimmed.removePrefix("### ")),
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                }
-                trimmed.startsWith("- ") || trimmed.startsWith("* ") -> {
-                    Row(
-                        modifier = Modifier.padding(start = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        Text("•", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-                        Text(
-                            text = parseInlineMarkdown(trimmed.substring(2)),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+            }
+        }
+        is FencedCodeBlock -> {
+            Surface(
+                color = codeBg,
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            ) {
+                Text(
+                    text = node.literal.trimEnd(),
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    color = onSurface,
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+        }
+        is IndentedCodeBlock -> {
+            Surface(
+                color = codeBg,
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            ) {
+                Text(
+                    text = node.literal.trimEnd(),
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    color = onSurface,
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+        }
+        is BlockQuote -> {
+            Row(
+                modifier = Modifier.padding(vertical = 4.dp, horizontal = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    Modifier
+                        .width(4.dp)
+                        .fillMaxHeight()
+                        .background(primaryColor, RoundedCornerShape(2.dp))
+                )
+                Column {
+                    var child = node.firstChild
+                    while (child != null) {
+                        RenderBlockNode(child, primaryColor, linkColor, onSurface, codeBg)
+                        child = child.next
                     }
                 }
-                trimmed.isEmpty() -> {
-                    Spacer(Modifier.height(4.dp))
-                }
-                else -> {
-                    Text(
-                        text = parseInlineMarkdown(trimmed),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
+            }
+        }
+        else -> {
+            var child = node.firstChild
+            while (child != null) {
+                RenderBlockNode(child, primaryColor, linkColor, onSurface, codeBg)
+                child = child.next
             }
         }
     }
 }
 
-private fun parseInlineMarkdown(text: String): AnnotatedString {
+private fun buildInlineMarkdown(
+    parent: Node,
+    linkColor: Color,
+    codeBg: Color
+): AnnotatedString {
     return buildAnnotatedString {
-        val regex = Regex("\\*\\*(.*?)\\*\\*")
-        var lastIndex = 0
-        regex.findAll(text).forEach { matchResult ->
-            append(text.substring(lastIndex, matchResult.range.first))
-            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                append(matchResult.groupValues[1])
+        fun visit(node: Node) {
+            var child = node.firstChild
+            while (child != null) {
+                when (child) {
+                    is CmText -> append(child.literal)
+                    is StrongEmphasis -> {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                            visit(child)
+                        }
+                    }
+                    is Emphasis -> {
+                        withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                            visit(child)
+                        }
+                    }
+                    is Code -> {
+                        withStyle(
+                            SpanStyle(
+                                fontFamily = FontFamily.Monospace,
+                                background = codeBg,
+                                fontSize = 13.sp
+                            )
+                        ) {
+                            append(" ${child.literal} ")
+                        }
+                    }
+                    is Link -> {
+                        val destination = child.destination
+                        val linkStyles = TextLinkStyles(
+                            style = SpanStyle(
+                                color = linkColor,
+                                textDecoration = TextDecoration.Underline,
+                                fontWeight = FontWeight.Medium
+                            )
+                        )
+                        withLink(LinkAnnotation.Url(url = destination, styles = linkStyles)) {
+                            visit(child)
+                        }
+                    }
+                    is SoftLineBreak, is HardLineBreak -> append("\n")
+                    else -> visit(child)
+                }
+                child = child.next
             }
-            lastIndex = matchResult.range.last + 1
         }
-        if (lastIndex < text.length) {
-            append(text.substring(lastIndex))
-        }
+        visit(parent)
     }
 }

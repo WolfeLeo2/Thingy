@@ -181,6 +181,7 @@ fun AppRoot(
                 }
                 entry<Home> {
                     MainShell(
+                        userId = user?.uid,
                         itemRepository = itemRepository,
                         spaceRepository = spaceRepository,
                         classifier = classifier,

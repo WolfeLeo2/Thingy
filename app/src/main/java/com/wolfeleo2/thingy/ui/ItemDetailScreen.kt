@@ -17,10 +17,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -46,6 +49,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ShoppingBag
+import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
+import androidx.compose.material3.carousel.rememberCarouselState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularWavyProgressIndicator
@@ -75,6 +80,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -430,7 +439,10 @@ private fun DetailPageContent(
         if (heroUrl != null) Hero(item, heroUrl, imageShared, isActive, onColorExtracted)
 
         if (ItemStatus.from(item.status) == ItemStatus.PROCESSING) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 CircularWavyProgressIndicator(modifier = Modifier.padding(2.dp).size(22.dp))
                 Text("Thingy is reading this…", style = MaterialTheme.typography.bodyMedium)
             }
@@ -494,6 +506,7 @@ private fun DetailPageContent(
         }
 
         if (similar.isNotEmpty()) MoreLikeThis(similar, onOpenItem)
+        Spacer(modifier = Modifier.height(10.dp))
     }
 }
 
@@ -506,6 +519,7 @@ private fun ProductLinks(item: Item, onFindLinks: () -> Unit) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         when {
             status == ProductsStatus.SEARCHING -> Row(
+                modifier = Modifier.align(Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -521,11 +535,13 @@ private fun ProductLinks(item: Item, onFindLinks: () -> Unit) {
             status == ProductsStatus.READY -> Text(
                 "No shopping links found.", style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
             )
-            else -> FilledTonalButton(onClick = onFindLinks) {
+            else -> FilledTonalButton(onClick = onFindLinks, modifier = Modifier.align(Alignment.CenterHorizontally)) {
                 Icon(Icons.Filled.ShoppingBag, null, modifier = Modifier.size(18.dp))
                 Text(if (status == ProductsStatus.FAILED) "Retry finding links" else "Find shopping links",
-                    modifier = Modifier.padding(start = 8.dp))
+                    modifier = Modifier
+                        .padding(start = 8.dp))
             }
         }
     }
@@ -559,6 +575,7 @@ private fun ProductCard(p: com.wolfeleo2.thingy.data.Product, onClick: () -> Uni
 }
 
 /** Horizontal strip of the most semantically-similar saves; tap opens them as a swipeable pager. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MoreLikeThis(similar: List<Item>, onOpenItem: (List<String>, Int) -> Unit) {
     val context = LocalContext.current
@@ -570,37 +587,66 @@ private fun MoreLikeThis(similar: List<Item>, onOpenItem: (List<String>, Int) ->
         HorizontalDivider()
         Text("More like this", style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.fillMaxWidth())
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            itemsIndexed(similar, key = { _, it -> it.id }) { index, s ->
-                Column(
-                    Modifier.width(120.dp).clickable { onOpenItem(ids, index) },
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    val model = s.previewModel(context)
-                    if (model != null) {
-                        AsyncImage(
-                            model = model, contentDescription = s.displayTitle(), contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxWidth().aspectRatio(1f)
-                                .clip(RoundedCornerShape(12.dp)),
+        // Swallows leftover horizontal drag so it never bleeds into the HorizontalPager behind it.
+        val isolateFromPager = remember {
+            object : NestedScrollConnection {
+                override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource) = available
+            }
+        }
+        val carouselState = rememberCarouselState { similar.size }
+        HorizontalMultiBrowseCarousel(
+            state = carouselState,
+            preferredItemWidth = 130.dp,
+            itemSpacing = 8.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(150.dp)
+                .nestedScroll(isolateFromPager),
+        ) { index ->
+            val s = similar[index]
+            val model = s.previewModel(context)
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .maskClip(MaterialTheme.shapes.large)
+                    .clickable { onOpenItem(ids, index) },
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (model != null) {
+                    AsyncImage(
+                        model = model,
+                        contentDescription = s.displayTitle(),
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .clip(MaterialTheme.shapes.large),
+                    )
+                } else {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = MaterialTheme.shapes.large,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                    ) {
+                        Text(
+                            s.displayTitle(),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 4,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(8.dp).fillMaxSize().wrapContentHeight(),
                         )
-                    } else {
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-                        ) {
-                            Text(
-                                s.displayTitle(), style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 4,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(8.dp).fillMaxSize().wrapContentHeight(),
-                            )
-                        }
                     }
-                    Text(s.displayTitle(), style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2,
-                        overflow = TextOverflow.Ellipsis)
                 }
+                Text(
+                    s.displayTitle(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }

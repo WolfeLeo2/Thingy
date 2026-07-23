@@ -113,9 +113,10 @@ dependencies {
     // On-device text embeddings (semantic search) — TFLite runtime via Play Services (no bundled .so)
     implementation(libs.play.services.tflite.java)
 
-    // Settings + coroutines + WorkManager
+    // Settings + coroutines + WorkManager + CommonMark
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.commonmark)
     implementation(libs.material.kolor)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.jsoup)
