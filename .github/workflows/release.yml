@@ -54,6 +54,7 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
+          SERP_API_KEY: ${{ secrets.SERP_API_KEY }}
         run: |
           ./gradlew assembleRelease \
             -PVERSION_NAME=${{ steps.tag.outputs.new_version }} \

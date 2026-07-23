@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Log
+import com.wolfeleo2.thingy.BuildConfig
 import com.google.firebase.Firebase
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.GenerativeBackend
@@ -212,6 +213,83 @@ class Classifier(
     }
 
     /**
+     * "Find links": the user pressed the button on an item. Identify the primary product (vision for
+     * images, classified text otherwise) via Gemini, run one SerpAPI Google Shopping search, and store
+     * the top results on the item. Ports ai.ts findProductLinks — but fully client-side (the SerpAPI
+     * key is baked into the APK). Live-updates the detail UI via the item's Firestore listener.
+     */
+    suspend fun findProductLinks(item: Item) {
+        try {
+            items.setProductsStatus(item.id, ProductsStatus.SEARCHING)
+            val apiKey = BuildConfig.SERP_API_KEY
+            if (apiKey.isBlank()) {
+                Log.w("Thingy", "findProductLinks: SERP_API_KEY is not set")
+                items.setProductsStatus(item.id, ProductsStatus.FAILED)
+                return
+            }
+
+            val model = genModel(PRODUCT_QUERY_SCHEMA)
+            val response = if (item.type == ItemType.IMAGE.wire) {
+                val bmp = loadBitmap(item.imageUrl, item.storagePath)
+                    ?: run { items.setProductsStatus(item.id, ProductsStatus.FAILED); return }
+                model.generateContent(content { text(PRODUCT_IMAGE_PROMPT); image(bmp) })
+            } else {
+                model.generateContent(productTextPrompt(item))
+            }
+            val query = JSONObject(response.text ?: "{}").optString("query").trim()
+            if (query.isEmpty()) {
+                // Not a product — an empty but successful result (the UI says so).
+                items.setProducts(item.id, emptyList(), ProductsStatus.READY)
+                return
+            }
+
+            val products = withContext(Dispatchers.IO) {
+                val url = "https://serpapi.com/search.json?engine=google_shopping&gl=us&hl=en" +
+                    "&q=${java.net.URLEncoder.encode(query, "UTF-8")}&api_key=$apiKey"
+                parseShoppingResults(JSONObject(URL(url).readText()))
+            }
+            items.setProducts(item.id, products, ProductsStatus.READY)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w("Thingy", "findProductLinks failed for ${item.id}", e)
+            runCatching { items.setProductsStatus(item.id, ProductsStatus.FAILED) }
+        }
+    }
+
+    private fun productTextPrompt(item: Item) = listOf(
+        "Identify the primary purchasable product described by this saved item and produce a concise shopping search query for it: brand (if identifiable) + product type + distinguishing attributes, e.g. 'west elm leather sofa cognac'. If it does not describe a product, return an empty query.",
+        "Title: ${item.title ?: "(untitled)"}",
+        item.description?.let { "Description: $it" } ?: "",
+        if (item.tags.isNotEmpty()) "Tags: ${item.tags.joinToString(", ")}" else "",
+        item.url?.let { "URL: $it" } ?: "",
+        item.note?.let { "Note: ${it.take(2000)}" } ?: "",
+    ).filter { it.isNotEmpty() }.joinToString("\n")
+
+    /** Pull the fields we render out of SerpAPI's google_shopping response. */
+    private fun parseShoppingResults(payload: JSONObject): List<Product> {
+        val results = payload.optJSONArray("shopping_results") ?: return emptyList()
+        val out = ArrayList<Product>()
+        for (i in 0 until results.length()) {
+            val e = results.optJSONObject(i) ?: continue
+            val title = e.optString("title").trim()
+            val url = e.optString("product_link").ifBlank { e.optString("link") }
+            if (title.isEmpty() || !Regex("^https?://", RegexOption.IGNORE_CASE).containsMatchIn(url)) continue
+            out.add(
+                Product(
+                    title = title.take(120),
+                    url = url,
+                    price = e.optString("price").ifBlank { null },
+                    merchant = e.optString("source").ifBlank { null },
+                    thumbnailUrl = e.optString("thumbnail").ifBlank { null },
+                ),
+            )
+            if (out.size >= MAX_PRODUCTS) break
+        }
+        return out
+    }
+
+    /**
      * Purpose-steering: when an item enters a space, its title steers up to 3 space-scoped
      * intents written to that membership row. Ports ai.ts steerItemForSpace.
      */
@@ -379,6 +457,14 @@ class Classifier(
         const val UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         const val MAX_CONTENT_CHARS = 8000
         const val MAX_STORED_CONTENT_CHARS = 100000
+        const val MAX_PRODUCTS = 5
+
+        const val PRODUCT_IMAGE_PROMPT =
+            "Identify the primary product shown in this image and produce a concise shopping search " +
+            "query for it: brand (if identifiable) + product type + distinguishing attributes, e.g. " +
+            "'west elm leather sofa cognac'. If nothing in the image is a purchasable product, return an empty query."
+
+        val PRODUCT_QUERY_SCHEMA: Schema = Schema.obj(mapOf("query" to Schema.string()))
 
         const val SYSTEM_PROMPT =
             "You are the classifier for Thingy, a save-it-for-later app. Titles must be short and " +

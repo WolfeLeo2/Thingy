@@ -228,6 +228,7 @@ fun AppRoot(
                         spaceId = key.spaceId,
                         sharedTransitionScope = if (key.disableSharedTransition) null else this@SharedTransitionLayout,
                         animatedVisibilityScope = if (key.disableSharedTransition) null else LocalNavAnimatedContentScope.current,
+                        onOpenItem = { ids, index -> backStack.add(ItemDetail(ids, index, disableSharedTransition = true)) },
                         onBack = onBack,
                     )
                 }

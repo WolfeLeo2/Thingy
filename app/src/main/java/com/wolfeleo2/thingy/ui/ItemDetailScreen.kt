@@ -23,6 +23,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -41,6 +45,7 @@ import androidx.compose.material.icons.filled.NorthEast
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularWavyProgressIndicator
@@ -49,6 +54,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedAssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -80,6 +86,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -93,11 +100,13 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil3.compose.AsyncImage
+import com.wolfeleo2.thingy.data.Embedder
 import com.wolfeleo2.thingy.data.Intent
 import com.wolfeleo2.thingy.data.Item
 import com.wolfeleo2.thingy.data.ItemRepository
 import com.wolfeleo2.thingy.data.ItemStatus
 import com.wolfeleo2.thingy.data.ItemType
+import com.wolfeleo2.thingy.data.ProductsStatus
 import com.wolfeleo2.thingy.data.SettingsRepository
 import com.wolfeleo2.thingy.data.SpaceRepository
 import com.wolfeleo2.thingy.data.displayTitle
@@ -126,6 +135,7 @@ fun ItemDetailScreen(
     spaceId: String?,
     sharedTransitionScope: SharedTransitionScope?,
     animatedVisibilityScope: AnimatedVisibilityScope?,
+    onOpenItem: (List<String>, Int) -> Unit,
     onBack: () -> Unit,
 ) {
     val pagerState = rememberPagerState(
@@ -278,7 +288,8 @@ fun ItemDetailScreen(
                 HorizontalPager(state = pagerState, modifier = Modifier.weight(1f)) { page ->
                     itemIds.getOrNull(page)?.let {
                         val isActive = page == pagerState.currentPage
-                        DetailPage(itemRepository, spaceRepository, it, spaceId, sharedTransitionScope, animatedVisibilityScope, isActive) { scheme ->
+                        DetailPage(itemRepository, spaceRepository, it, spaceId, sharedTransitionScope, animatedVisibilityScope, isActive, onOpenItem,
+                            onFindLinks = { item -> scope.launch { classifier.findProductLinks(item) } }) { scheme ->
                             paletteSchemes[it] = scheme
                         }
                     }
@@ -330,6 +341,8 @@ private fun DetailPage(
     sharedTransitionScope: SharedTransitionScope?,
     animatedVisibilityScope: AnimatedVisibilityScope?,
     isActive: Boolean,
+    onOpenItem: (List<String>, Int) -> Unit,
+    onFindLinks: (Item) -> Unit,
     onColorExtracted: ((ColorScheme) -> Unit)? = null,
 ) {
     val item by remember(id) { itemRepository.item(id) }.collectAsStateWithLifecycle(null)
@@ -339,12 +352,30 @@ private fun DetailPage(
         value = if (spaceId != null) spaceRepository.membershipIntents(id, spaceId) else emptyList()
     }
 
+    // "More like this" — rank the rest of the library against this item's stored embedding.
+    // Pure cosine over already-indexed vectors: no embedder call, no network.
+    val similar by produceState(emptyList<Item>(), id, i.embedding) {
+        val emb = i.embedding?.takeIf { it.isNotEmpty() }
+        value = if (emb == null) emptyList()
+        else itemRepository.snapshotReadyItems(500).asSequence()
+            .filter { it.id != id }
+            .mapNotNull { c -> c.embedding?.takeIf { it.isNotEmpty() }?.let { c to Embedder.cosine(emb, it) } }
+            .filter { it.second >= Embedder.MIN_SCORE }
+            .sortedByDescending { it.second }
+            .take(12)
+            .map { it.first }
+            .toList()
+    }
+
     DetailPageContent(
         item = i,
         steeredIntents = steered,
+        similar = similar,
         isActive = isActive,
         sharedTransitionScope = sharedTransitionScope,
         animatedVisibilityScope = animatedVisibilityScope,
+        onOpenItem = onOpenItem,
+        onFindLinks = onFindLinks,
         onColorExtracted = onColorExtracted,
     )
 }
@@ -354,9 +385,12 @@ private fun DetailPage(
 private fun DetailPageContent(
     item: Item,
     steeredIntents: List<Intent>,
+    similar: List<Item> = emptyList(),
     isActive: Boolean,
     sharedTransitionScope: SharedTransitionScope? = null,
     animatedVisibilityScope: AnimatedVisibilityScope? = null,
+    onOpenItem: (List<String>, Int) -> Unit = { _, _ -> },
+    onFindLinks: (Item) -> Unit = {},
     onColorExtracted: ((ColorScheme) -> Unit)? = null,
 ) {
     val id = item.id
@@ -445,6 +479,8 @@ private fun DetailPageContent(
             }
         }
 
+        ProductLinks(item) { onFindLinks(item) }
+
         val paragraphs = item.content?.split(Regex("\\n{2,}"))?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
         if (paragraphs.isNotEmpty()) {
             HorizontalDivider(Modifier.padding(top = 4.dp))
@@ -453,6 +489,117 @@ private fun DetailPageContent(
                     paragraphs.forEach { p ->
                         Text(p, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
                     }
+                }
+            }
+        }
+
+        if (similar.isNotEmpty()) MoreLikeThis(similar, onOpenItem)
+    }
+}
+
+/** "Find links": user-triggered SerpAPI shopping search + its result cards / loading / empty states. */
+@Composable
+private fun ProductLinks(item: Item, onFindLinks: () -> Unit) {
+    val context = LocalContext.current
+    val status = ProductsStatus.from(item.productsStatus)
+    val products = item.products.orEmpty()
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        when {
+            status == ProductsStatus.SEARCHING -> Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                CircularWavyProgressIndicator(Modifier.size(22.dp))
+                Text("Finding shopping links…", style = MaterialTheme.typography.bodyMedium)
+            }
+            products.isNotEmpty() -> {
+                HorizontalDivider()
+                Text("Shopping links", style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.fillMaxWidth())
+                products.forEach { p -> ProductCard(p) { runIntent(context, "open_url", p.url) } }
+            }
+            status == ProductsStatus.READY -> Text(
+                "No shopping links found.", style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            else -> FilledTonalButton(onClick = onFindLinks) {
+                Icon(Icons.Filled.ShoppingBag, null, modifier = Modifier.size(18.dp))
+                Text(if (status == ProductsStatus.FAILED) "Retry finding links" else "Find shopping links",
+                    modifier = Modifier.padding(start = 8.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProductCard(p: com.wolfeleo2.thingy.data.Product, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick, shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            p.thumbnailUrl?.let {
+                AsyncImage(model = it, contentDescription = p.title, contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(p.title, style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    p.price?.let { Text(it, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary) }
+                    p.merchant?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                }
+            }
+            Icon(Icons.Filled.NorthEast, null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+/** Horizontal strip of the most semantically-similar saves; tap opens them as a swipeable pager. */
+@Composable
+private fun MoreLikeThis(similar: List<Item>, onOpenItem: (List<String>, Int) -> Unit) {
+    val context = LocalContext.current
+    val ids = remember(similar) { similar.map { it.id } }
+    Column(
+        Modifier.fillMaxWidth().padding(top = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        HorizontalDivider()
+        Text("More like this", style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.fillMaxWidth())
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            itemsIndexed(similar, key = { _, it -> it.id }) { index, s ->
+                Column(
+                    Modifier.width(120.dp).clickable { onOpenItem(ids, index) },
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    val model = s.previewModel(context)
+                    if (model != null) {
+                        AsyncImage(
+                            model = model, contentDescription = s.displayTitle(), contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxWidth().aspectRatio(1f)
+                                .clip(RoundedCornerShape(12.dp)),
+                        )
+                    } else {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                        ) {
+                            Text(
+                                s.displayTitle(), style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 4,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(8.dp).fillMaxSize().wrapContentHeight(),
+                            )
+                        }
+                    }
+                    Text(s.displayTitle(), style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2,
+                        overflow = TextOverflow.Ellipsis)
                 }
             }
         }

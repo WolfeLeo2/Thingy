@@ -129,6 +129,26 @@ class ItemRepository(
         items.document(id).update("embedding", vector).await()
     }
 
+    /** Mark the "Find links" pass in-flight (or failed) without touching stored products. */
+    suspend fun setProductsStatus(id: String, status: ProductsStatus) {
+        items.document(id).update("productsStatus", status.wire).await()
+    }
+
+    /** Store the SerpAPI shopping results (may be empty) and the terminal status. */
+    suspend fun setProducts(id: String, products: List<Product>, status: ProductsStatus) {
+        items.document(id).update(
+            mapOf(
+                "products" to products.map {
+                    mapOf(
+                        "title" to it.title, "url" to it.url, "price" to it.price,
+                        "merchant" to it.merchant, "thumbnailUrl" to it.thumbnailUrl,
+                    )
+                },
+                "productsStatus" to status.wire,
+            ),
+        ).await()
+    }
+
     /** Ready items, newest first — the candidate pool for space recommendations. */
     suspend fun snapshotItem(id: String): Item? =
         items.document(id).get().await().toObject(Item::class.java)

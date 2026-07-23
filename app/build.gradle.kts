@@ -35,6 +35,12 @@ android {
             localProperties.getProperty("MAPBOX_ACCESS_TOKEN")
                 ?: System.getenv("MAPBOX_ACCESS_TOKEN") ?: "",
         )
+        // SerpAPI key for the user-triggered "Find shopping links" pass. Baked into the APK
+        // (hobby-scale; same trade-off as the unsigned Cloudinary preset).
+        buildConfigField(
+            "String", "SERP_API_KEY",
+            "\"${localProperties.getProperty("SERP_API_KEY") ?: System.getenv("SERP_API_KEY") ?: ""}\"",
+        )
     }
 
     if (ciKeystorePath != null) {
