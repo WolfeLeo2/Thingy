@@ -364,13 +364,24 @@ class Classifier(
         conn.url.toString()
     }.getOrDefault(url)
 
+    private val PINTEREST_PIN_ID = Regex("/pin/(\\d+)")
+
+    /** pin.it redirects to variants like /pin/<id>/sent/?invite_code=...&sender=... (share/invite
+     * links) which oEmbed also rejects ("Url was not found") — it only accepts the bare pin URL. */
+    private fun canonicalPinterestUrl(url: String): String =
+        PINTEREST_PIN_ID.find(url)?.let { "https://www.pinterest.com/pin/${it.groupValues[1]}/" } ?: url
+
     /** Tries a provider's official oEmbed endpoint before falling back to HTML/OG scraping — more
      * reliable for platforms that serve a consent wall or empty JS shell to a plain HTTP GET. */
     private suspend fun fetchOEmbed(url: String): OEmbed? = withContext(Dispatchers.IO) {
         val host = runCatching { URI(url).host?.removePrefix("www.")?.lowercase() }.getOrNull() ?: return@withContext null
         val endpointFor = OEMBED_ENDPOINTS.firstOrNull { (hosts, _) -> hosts.any { host == it || host.endsWith(".$it") } }
             ?.second ?: return@withContext null
-        val resolvedUrl = if (host == "pin.it") resolveRedirect(url) else url
+        val resolvedUrl = when {
+            host == "pin.it" -> canonicalPinterestUrl(resolveRedirect(url))
+            host == "pinterest.com" || host.endsWith(".pinterest.com") -> canonicalPinterestUrl(url)
+            else -> url
+        }
         runCatching {
             val conn = URL(endpointFor(resolvedUrl)).openConnection() as HttpURLConnection
             conn.setRequestProperty("Accept", "application/json")
