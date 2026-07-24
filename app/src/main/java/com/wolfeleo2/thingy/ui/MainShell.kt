@@ -3,32 +3,22 @@ package com.wolfeleo2.thingy.ui
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
-import androidx.compose.foundation.lazy.staggeredgrid.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Style
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialShapes
@@ -41,14 +31,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
@@ -57,29 +44,23 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.util.UnstableApi
 import com.wolfeleo2.thingy.data.Embedder
 import com.wolfeleo2.thingy.data.ImageIngestor
-import com.wolfeleo2.thingy.data.Item
 import com.wolfeleo2.thingy.data.ItemRepository
 import com.wolfeleo2.thingy.data.SettingsRepository
 import com.wolfeleo2.thingy.data.SpaceItemStatus
 import com.wolfeleo2.thingy.data.SpaceRepository
 import com.wolfeleo2.thingy.data.SpacesLayout
 import com.wolfeleo2.thingy.data.VideoIngestor
-import com.wolfeleo2.thingy.reminders.ReminderManager
 import com.wolfeleo2.thingy.ui.add.AddSheet
-import com.wolfeleo2.thingy.ui.reminders.ResurfaceCard
-import com.wolfeleo2.thingy.ui.reminders.SnoozeSheet
 import com.wolfeleo2.thingy.ui.share.CollageShareSheet
 import com.wolfeleo2.thingy.ui.tidy.TidyScreen
 import kotlinx.coroutines.launch
@@ -232,149 +213,6 @@ private fun NavIcon(tab: Tab, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
-@OptIn(ExperimentalSharedTransitionApi::class, ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun HomeFeed(
-    library: LibraryViewModel,
-    itemRepository: ItemRepository,
-    spaceRepository: SpaceRepository,
-    classifier: com.wolfeleo2.thingy.data.Classifier,
-    settings: SettingsRepository,
-    sharedTransitionScope: SharedTransitionScope,
-    animatedVisibilityScope: AnimatedVisibilityScope,
-    onOpenItem: (List<String>, Int) -> Unit,
-    onAddToSpace: (String) -> Unit,
-) {
-    val context = LocalContext.current
-    val items by library.items.collectAsStateWithLifecycle()
-    val suggestions by library.spaceSuggestions.collectAsStateWithLifecycle()
-    val dismissed by settings.dismissedSuggestions.collectAsStateWithLifecycle(emptySet())
-    val resurfacedId by settings.resurfacedItemId.collectAsStateWithLifecycle(null)
-    var snoozeTarget by remember { mutableStateOf<Item?>(null) }
-    val scope = rememberCoroutineScope()
-
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        ReminderManager.scheduleDailyResurface(context)
-    }
-
-    val list = items ?: return // loading — blank for the frame before the cache resolves
-    if (list.isEmpty()) {
-        ThingyEmptyState(
-            shape = MaterialShapes.Cookie9Sided,
-            icon = Icons.Filled.GridView,
-            title = "Nothing saved yet",
-            message = "Everything lands in one calm feed.",
-        )
-        return
-    }
-    val ids = list.map { it.id }
-    val suggestion = suggestions.firstOrNull { it.tag.lowercase() !in dismissed }
-    val resurfacedItem = remember(resurfacedId, list) {
-        if (resurfacedId != null) list.firstOrNull { it.id == resurfacedId } else null
-    }
-    var burstTrigger by remember { mutableIntStateOf(0) }
-
-    Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize()) {
-            resurfacedItem?.let { item ->
-                val index = ids.indexOf(item.id)
-                ResurfaceCard(
-                    item = item,
-                    onOpen = { onOpenItem(ids, index.coerceAtLeast(0)) },
-                    onSnooze = { snoozeTarget = item },
-                    onDismiss = { scope.launch { settings.dismissResurfacing() } }
-                )
-            }
-            suggestion?.let { s ->
-                SpaceSuggestionCard(
-                    suggestion = s,
-                    onCreate = {
-                        burstTrigger++
-                        scope.launch {
-                            val spaceId = spaceRepository.createSpace(name = s.tag.replaceFirstChar { it.uppercase() }, dynamic = true)
-                            s.itemIds.forEach { id -> spaceRepository.addItemToSpace(id, spaceId) }
-                            classifier.recommendForSpace(spaceId)
-                        }
-                    },
-                    onDismiss = { scope.launch { settings.dismissSuggestion(s.tag) } },
-                )
-            }
-            Box(Modifier.weight(1f)) {
-                Grid {
-                    itemsIndexed(list, key = { _, it -> it.id }) { index, item ->
-                        ItemCard(
-                            item = item,
-                            onClick = { onOpenItem(ids, index) },
-                            sharedTransitionScope = sharedTransitionScope,
-                            animatedVisibilityScope = animatedVisibilityScope,
-                            modifier = Modifier.animateItem(),
-                            onAddToSpace = { onAddToSpace(item.id) },
-                            onDelete = { scope.launch { itemRepository.delete(item.id) } },
-                        )
-                    }
-                }
-            }
-        }
-
-        ShapeBurstEffect(trigger = burstTrigger)
-
-        snoozeTarget?.let { target ->
-            SnoozeSheet(
-                item = target,
-                settings = settings,
-                onDismiss = { snoozeTarget = null }
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun SpaceSuggestionCard(
-    suggestion: SpaceSuggestion,
-    onCreate: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.primaryContainer,
-        shape = RoundedCornerShape(24.dp),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-    ) {
-        Column {
-            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(44.dp).clip(rememberMaterialShape(MaterialShapes.Sunny))
-                        .background(MaterialTheme.colorScheme.primary),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Filled.AutoAwesome, contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(20.dp))
-                }
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "Create a \"${suggestion.tag.replaceFirstChar { it.uppercase() }}\" space?",
-                        style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                    Text(
-                        "${suggestion.itemIds.size} saves would fit right in",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
-                    )
-                }
-            }
-            Row(
-                Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                TextButton(onClick = onDismiss) { Text("Not now") }
-                Button(onClick = onCreate, shapes = expressiveButtonShapes()) { Text("Create") }
-            }
-        }
-    }
-}
-
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun SpacesGrid(
@@ -420,7 +258,7 @@ private fun SpacesGrid(
 }
 
 @Composable
-private fun Grid(content: androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridScope.() -> Unit) {
+internal fun Grid(content: androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridScope.() -> Unit) {
     LazyVerticalStaggeredGrid(
         columns = StaggeredGridCells.Fixed(2),
         // bottom padding clears the floating toolbar
@@ -430,15 +268,4 @@ private fun Grid(content: androidx.compose.foundation.lazy.staggeredgrid.LazySta
         modifier = Modifier.fillMaxSize(),
         content = content,
     )
-}
-
-@Composable
-private fun EmptyState(title: String, message: String) {
-    Box(Modifier.fillMaxSize().padding(32.dp), Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, style = MaterialTheme.typography.titleLarge)
-            Text(message, style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-        }
-    }
 }
