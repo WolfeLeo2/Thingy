@@ -104,8 +104,12 @@ fun AppRoot(
         if (user != null) {
             // Migrate legacy items (local / Firebase Storage) to Cloudinary in the background.
             launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { cloudinaryMigration.run() } }
-            // Backfill spaces created before sharing existed with memberIds.
-            launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { spaceRepository.migrateLegacySpacesToMemberIds() } }
+            // Backfill spaces created before sharing existed with memberIds, then repair any shared-space
+            // items whose visibleTo is missing co-members (one such item blanks the whole space screen).
+            launch(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { spaceRepository.migrateLegacySpacesToMemberIds() }
+                runCatching { spaceRepository.backfillSharedItemVisibility() }
+            }
             // Download any missing images to filesDir for true offline access.
             launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { offlineSyncer.run() } }
             runCatching { classifier.run() } // collects the feed; cancels on sign-out

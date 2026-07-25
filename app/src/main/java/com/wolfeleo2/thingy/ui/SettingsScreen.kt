@@ -23,8 +23,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -53,6 +51,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -187,10 +186,10 @@ fun SettingsScreen(
                     Text("Smart search", style = MaterialTheme.typography.bodyLarge)
                     fun mb(b: Long) = "%.1f MB".format(b / 1_000_000.0)
                     val status = when {
-                        downloading && dlTotal > 0 -> "Downloading model — ${mb(dlBytes)} / ${mb(dlTotal)}"
+                        downloading && dlTotal > 0 -> "Downloading model - ${mb(dlBytes)} / ${mb(dlTotal)}"
                         downloading -> "Downloading model…"
-                        smartSearch && downloadFailed -> "Download failed — toggle again to retry"
-                        smartSearch && modelReady -> "Understands meaning · works offline"
+                        smartSearch && downloadFailed -> "Download failed. Try Again?"
+                        smartSearch && modelReady -> "Semantic search"
                         smartSearch -> "Preparing…"
                         else -> "Search by meaning, not just words. One-time ~few-MB download, then offline."
                     }
@@ -214,12 +213,12 @@ fun SettingsScreen(
             }
             if (downloading) {
                 if (dlTotal > 0) {
-                    LinearWavyProgressIndicator(
+                    LinearProgressIndicator(
                         progress = { (dlBytes.toFloat() / dlTotal).coerceIn(0f, 1f) },
                         modifier = Modifier.fillMaxWidth(),
                     )
                 } else {
-                    LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
             }
 

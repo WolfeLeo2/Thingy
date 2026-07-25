@@ -214,6 +214,38 @@ class SpaceRepository(
         }
     }
 
+    /**
+     * Repairs items in shared spaces whose visibleTo never got the co-members added — rows written by
+     * the old suggestSpaces (which skipped the grant) blank out every other member's space screen,
+     * because one unreadable doc rejects the whole `whereIn` listen rather than just dropping a row.
+     *
+     * Only touches items *this* user owns, which is all the rules permit and all that's needed: the
+     * broken rows on each side were created by that side's own classifier, so both devices running
+     * this heal the whole space between them. Idempotent (arrayUnion) — safe to re-run every sign-in.
+     */
+    suspend fun backfillSharedItemVisibility() {
+        val user = uid ?: return
+        val shared = spaces.whereArrayContains("memberIds", user).get().await()
+            .toObjects(Space::class.java).filter { it.memberIds.size > 1 }
+        for (space in shared) {
+            val itemIds = spaceItems.whereEqualTo("spaceId", space.id).get().await()
+                .documents.mapNotNull { it.getString("itemId") }.distinct()
+            if (itemIds.isEmpty()) continue
+            // Owner-only: a batch that touches someone else's item would fail the whole commit.
+            val mine = items.whereIn(com.google.firebase.firestore.FieldPath.documentId(), itemIds.take(30)).get().await()
+                .documents.filter { it.getString("userId") == user }
+            val stale = mine.filter { doc ->
+                val visible = doc.get("visibleTo") as? List<*> ?: emptyList<Any>()
+                !visible.containsAll(space.memberIds)
+            }
+            if (stale.isEmpty()) continue
+            val batch = db.batch()
+            stale.forEach { batch.update(it.reference, "visibleTo", FieldValue.arrayUnion(*space.memberIds.toTypedArray())) }
+            runCatching { batch.commit().await() }
+                .onFailure { Log.w("Thingy", "visibility backfill failed for ${space.id}", it) }
+        }
+    }
+
     suspend fun snapshotDynamicSpaces(): List<Space> {
         val user = uid ?: return emptyList()
         return spaces.whereArrayContains("memberIds", user).get().await()
@@ -246,6 +278,10 @@ class SpaceRepository(
         for (sid in spaceIds) {
             if (sid in existing) continue
             spaceItems.document("${sid}_$itemId").set(SpaceItem(userId = user, spaceId = sid, itemId = itemId, status = SpaceItemStatus.SUGGESTED.wire)).await()
+            // Must grant, exactly like suggestItemsForSpace does: a suggestion row makes this item part
+            // of the space for *every* member's read, and items an co-member can't read take the whole
+            // `whereIn` listen down with them (Firestore rejects the query, not the row).
+            grantSpaceVisibility(listOf(itemId), sid)
         }
     }
 

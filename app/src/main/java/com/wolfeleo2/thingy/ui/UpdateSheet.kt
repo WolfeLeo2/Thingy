@@ -116,7 +116,11 @@ fun UpdateSheet(
                 val file = pendingInstallFile
                 if (file != null && checker.canInstallPackages()) {
                     pendingInstallFile = null
-                    if (checker.install(file)) onDismiss()
+                    // install() rejects a package that didn't survive the permission detour — surface
+                    // that instead of throwing out of a lifecycle callback.
+                    runCatching { checker.install(file) }
+                        .onSuccess { launched -> if (launched) onDismiss() }
+                        .onFailure { error = it.message }
                 }
             }
         }

@@ -34,7 +34,14 @@ class ItemRepository(
         awaitClose { reg.remove() }
     }
 
-    /** Fetches items by id regardless of owner — for a shared space's items added by other members. */
+    /**
+     * Fetches items by id regardless of owner — for a shared space's items added by other members.
+     *
+     * ponytail: a `whereIn` listen is all-or-nothing under security rules — one item the caller can't
+     * read rejects the entire query, so a single bad ACL blanks a whole chunk of 30 (that's how the
+     * missing suggestSpaces grant showed up as an empty space screen). Kept as-is because the write
+     * paths now all grant visibility; if this ever recurs, degrade to per-id listens for the chunk.
+     */
     fun itemsByIds(ids: List<String>): Flow<List<Item>> {
         if (ids.isEmpty()) return flowOf(emptyList())
         val chunkFlows = ids.chunked(30).map { chunk ->

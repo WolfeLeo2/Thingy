@@ -49,13 +49,26 @@ class UpdateChecker(private val context: Context) {
 
     suspend fun download(update: AppUpdate, onProgress: (bytesRead: Long, totalBytes: Long) -> Unit = { _, _ -> }): File =
         withContext(Dispatchers.IO) {
-            val dir = File(context.cacheDir, "updates").also { it.mkdirs() }
+            // filesDir, NOT cacheDir: the system reclaims cacheDir first when storage runs low, and it
+            // will happily evict a 50 MB APK out from under us between this write and the install —
+            // which surfaces as the installer's useless "There was a problem parsing this package."
+            // install() also detours through the "allow unknown sources" screen, so that window is long.
+            val dir = File(context.filesDir, "updates").also { it.mkdirs() }
+            // Nothing else reaps these; without this every release leaves another ~50 MB behind forever.
+            dir.listFiles()?.forEach { it.delete() }
             val file = File(dir, "thingy-${update.version}.apk")
             val conn = URL(update.apkUrl).openConnection() as HttpURLConnection
             conn.connectTimeout = 15_000
             conn.readTimeout = 60_000
             conn.instanceFollowRedirects = true
             val total = conn.contentLengthLong
+            // Staging + dexopt need well over the APK's own size; failing here beats a parse error later.
+            if (total > 0 && dir.usableSpace < total * 2) {
+                throw java.io.IOException(
+                    "Not enough free space: needs ~${total * 2 / 1_000_000} MB, " +
+                        "${dir.usableSpace / 1_000_000} MB available",
+                )
+            }
             conn.inputStream.use { input ->
                 file.outputStream().use { output ->
                     val buffer = ByteArray(8192)
@@ -78,6 +91,15 @@ class UpdateChecker(private val context: Context) {
             file
         }
 
+    /**
+     * Cheap structural check that [apkFile] is still a complete APK. Reading the zip central directory
+     * catches truncation or eviction that happened after the download's byte-count check — the installer's
+     * own diagnosis for that state is the unhelpful "problem parsing the package".
+     */
+    private fun isIntactApk(apkFile: File): Boolean = runCatching {
+        java.util.zip.ZipFile(apkFile).use { it.getEntry("AndroidManifest.xml") != null }
+    }.getOrDefault(false)
+
     fun canInstallPackages(): Boolean = context.packageManager.canRequestPackageInstalls()
 
     /**
@@ -86,6 +108,12 @@ class UpdateChecker(private val context: Context) {
      * hold onto [apkFile] and retry once the user grants the permission and returns to the app.
      */
     fun install(apkFile: File): Boolean {
+        // Re-check here, not just after download: the permission detour can leave the file sitting for
+        // minutes, and on a nearly-full device it may not survive that wait.
+        if (!isIntactApk(apkFile)) {
+            apkFile.delete()
+            throw java.io.IOException("Update package was incomplete or removed before install — please retry")
+        }
         if (!canInstallPackages()) {
             context.startActivity(
                 Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
