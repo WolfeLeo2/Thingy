@@ -46,9 +46,20 @@ class ItemRepository(
         if (ids.isEmpty()) return flowOf(emptyList())
         val chunkFlows = ids.chunked(30).map { chunk ->
             callbackFlow {
+                // Once this chunk has produced a value, an error must NOT overwrite it with empty —
+                // that's what turned a single rejected listen into a blank space screen; holding the
+                // last good value degrades to "stale" rather than "everything vanished". But the first
+                // event has to emit something even on failure, or combine() below never produces a
+                // value and one bad chunk would hide all the healthy ones.
+                var emitted = false
                 val reg = items.whereIn(FieldPath.documentId(), chunk).addSnapshotListener { snap, err ->
-                    if (err != null) { Log.w("Thingy", "itemsByIds listen failed", err); trySend(emptyList()) }
-                    else trySend(snap?.toObjects(Item::class.java).orEmpty())
+                    if (err != null) {
+                        Log.w("Thingy", "itemsByIds listen failed", err)
+                        if (!emitted) { emitted = true; trySend(emptyList()) }
+                    } else {
+                        emitted = true
+                        trySend(snap?.toObjects(Item::class.java).orEmpty())
+                    }
                 }
                 awaitClose { reg.remove() }
             }
@@ -111,10 +122,15 @@ class ItemRepository(
         val item = base.copy(userId = user, status = ItemStatus.PROCESSING.wire, visibleTo = listOf(user))
         val ref = items.add(item).await()
         if (spaceId != null) {
-            spaceItems.document("${spaceId}_${ref.id}")
-                .set(SpaceItem(userId = user, spaceId = spaceId, itemId = ref.id, status = SpaceItemStatus.SAVED.wire)).await()
+            // Grant visibility BEFORE writing the membership row, never after. The row is what every
+            // other member's space listener watches: the moment it lands they query this item, and if
+            // visibleTo hasn't caught up yet that listen is rejected — permanently, because Firestore
+            // does not retry a permission-denied listener. Their space screen then stays blank even
+            // though the grant arrives milliseconds later.
             val memberIds = spaces.document(spaceId).get().await().toObject(Space::class.java)?.memberIds.orEmpty()
             if (memberIds.isNotEmpty()) items.document(ref.id).update("visibleTo", FieldValue.arrayUnion(*memberIds.toTypedArray())).await()
+            spaceItems.document("${spaceId}_${ref.id}")
+                .set(SpaceItem(userId = user, spaceId = spaceId, itemId = ref.id, status = SpaceItemStatus.SAVED.wire)).await()
         }
         return ref.id
     }

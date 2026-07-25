@@ -96,6 +96,7 @@ import kotlin.math.sin
 private data class NudgeStep(
     val title: String,
     val subtitle: String,
+    val emoji: String,
     val calculateTime: () -> Long
 )
 
@@ -148,16 +149,16 @@ fun SnoozeSheet(
 
     val steps = remember {
         listOf(
-            NudgeStep("+30 Mins", "Quick 30-minute breather ⚡") {
+            NudgeStep("+30 Mins", "Quick 30-minute breather", "⚡") {
                 System.currentTimeMillis() + 30 * 60 * 1000L
             },
-            NudgeStep("+2 Hours", "Perfect for your afternoon break ☕") {
+            NudgeStep("+2 Hours", "Perfect for your afternoon break", "☕") {
                 System.currentTimeMillis() + 2 * 3600 * 1000L
             },
-            NudgeStep("+5 Hours", "Later today focus window 🎯") {
+            NudgeStep("+5 Hours", "Later today focus window", "🎯") {
                 System.currentTimeMillis() + 5 * 3600 * 1000L
             },
-            NudgeStep("Tonight", "Evening unwind & catch up 🌙") {
+            NudgeStep("Tonight", "Evening unwind & catch up", "🌙") {
                 val cal = Calendar.getInstance().apply {
                     set(Calendar.HOUR_OF_DAY, 19); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0)
                 }
@@ -169,20 +170,20 @@ fun SnoozeSheet(
                 }
                 cal.timeInMillis
             },
-            NudgeStep("Tomorrow AM", "Fresh start tomorrow morning ☀️") {
+            NudgeStep("Tomorrow AM", "Fresh start tomorrow morning", "☀️") {
                 Calendar.getInstance().apply {
                     add(Calendar.DAY_OF_YEAR, 1)
                     set(Calendar.HOUR_OF_DAY, 9); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0)
                 }.timeInMillis
             },
-            NudgeStep("This Weekend", "Saved for Saturday relaxation 🏖️") {
+            NudgeStep("This Weekend", "Saved for Saturday relaxation", "🏖️") {
                 Calendar.getInstance().apply {
                     set(Calendar.DAY_OF_WEEK, Calendar.SATURDAY)
                     set(Calendar.HOUR_OF_DAY, 9); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0)
                     if (before(Calendar.getInstance())) add(Calendar.WEEK_OF_YEAR, 1)
                 }.timeInMillis
             },
-            NudgeStep("Custom...", "Choose exact date & time ⏱️") {
+            NudgeStep("Custom...", "Choose exact date & time", "⏱️") {
                 System.currentTimeMillis() + 24 * 3600 * 1000L
             }
         )
@@ -318,12 +319,12 @@ fun SnoozeSheet(
                 Spacer(Modifier.height(4.dp))
 
                 AnimatedContent(
-                    targetState = currentStep.subtitle,
+                    targetState = "${currentStep.subtitle} ${currentStep.emoji}",
                     transitionSpec = { fadeIn() togetherWith fadeOut() },
                     label = "subTitle"
-                ) { subtitle ->
+                ) { subtitleText ->
                     Text(
-                        text = subtitle,
+                        text = subtitleText,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
@@ -362,7 +363,7 @@ fun SnoozeSheet(
                                 showCustomPicker = true
                             }
                         },
-                        label = { Text(step.title, style = MaterialTheme.typography.labelSmall) }
+                        label = { Text("${step.title} ${step.emoji}", style = MaterialTheme.typography.labelSmall) }
                     )
                 }
             }
@@ -390,8 +391,8 @@ fun SnoozeSheet(
                 Icon(Icons.Filled.Alarm, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    if (currentStepIndex == steps.size - 1) "Pick Date & Time…"
-                    else "Set Nudge for ${currentStep.title} ✨"
+                    if (currentStepIndex == steps.size - 1) "Pick Date & Time ${currentStep.emoji}"
+                    else "Set Nudge for ${currentStep.title} ${currentStep.emoji}"
                 )
             }
         }

@@ -24,7 +24,16 @@ class SpaceRepository(
     private val invites get() = db.collection("invites")
     private val items get() = db.collection("items")
 
-    /** Grants every member of [spaceId] read access to [itemIds] (denormalized onto Item.visibleTo). */
+    /**
+     * Grants every member of [spaceId] read access to [itemIds] (denormalized onto Item.visibleTo).
+     *
+     * ORDERING INVARIANT — call this *before* writing the spaceItems row, never after. The row is what
+     * co-members' `membershipsForSpace` listeners watch; the instant it lands they issue an itemsByIds
+     * `whereIn` for the item, and if visibleTo hasn't been written yet that listen is rejected. Firestore
+     * never retries a permission-denied listener, so their space screen stays blank for the rest of the
+     * session even though the grant arrives milliseconds later. Writing the row last makes the item
+     * readable before anyone can learn it exists.
+     */
     private suspend fun grantSpaceVisibility(itemIds: Collection<String>, spaceId: String) {
         if (itemIds.isEmpty()) return
         val memberIds = spaces.document(spaceId).get().await().toObject(Space::class.java)?.memberIds.orEmpty()
@@ -180,15 +189,22 @@ class SpaceRepository(
         // Drop the grants this space handed out before its memberIds become unreadable. Owner keeps
         // access via the rules' ownership check, so stripping them from visibleTo is safe.
         val revoked = space?.memberIds.orEmpty()
+        // The teardown that's always permitted, in one batch. visibleTo is deliberately NOT in here:
+        // the rules only let a user rewrite visibleTo on items they own, so including a co-member's item
+        // failed the *entire* batch — which is why deleting a shared space silently did nothing.
         val batch = db.batch()
         itemDocs.documents.forEach { batch.delete(it.reference) }
         memberDocs.documents.forEach { batch.delete(it.reference) }
-        if (revoked.isNotEmpty()) {
-            itemIds.forEach { batch.update(items.document(it), "visibleTo", FieldValue.arrayRemove(*revoked.toTypedArray())) }
-        }
         space?.activeInviteCode?.let { batch.delete(invites.document(it)) }
         batch.commit().await()
         spaces.document(id).delete().await()
+        // Revocation is best-effort and per-item, since only our own items are writable. Co-members'
+        // items keep a stale visibleTo entry — the known ceiling that wants a Cloud Function.
+        if (revoked.isNotEmpty()) {
+            itemIds.forEach { itemId ->
+                runCatching { items.document(itemId).update("visibleTo", FieldValue.arrayRemove(*revoked.toTypedArray())).await() }
+            }
+        }
         // Re-grant from whatever *other* spaces still hold these items (no-op for solo items).
         itemIds.forEach { recomputeItemVisibility(it) }
     }
@@ -279,11 +295,11 @@ class SpaceRepository(
             .documents.mapNotNull { it.getString("spaceId") }.toSet()
         for (sid in spaceIds) {
             if (sid in existing) continue
-            spaceItems.document("${sid}_$itemId").set(SpaceItem(userId = user, spaceId = sid, itemId = itemId, status = SpaceItemStatus.SUGGESTED.wire)).await()
-            // Must grant, exactly like suggestItemsForSpace does: a suggestion row makes this item part
-            // of the space for *every* member's read, and items an co-member can't read take the whole
-            // `whereIn` listen down with them (Firestore rejects the query, not the row).
+            // Grant before the row lands: a suggestion row makes this item part of the space for *every*
+            // member's read, and an item a co-member can't read takes the whole `whereIn` listen down
+            // with it (Firestore rejects the query, not the row). See grantSpaceVisibility.
             grantSpaceVisibility(listOf(itemId), sid)
+            spaceItems.document("${sid}_$itemId").set(SpaceItem(userId = user, spaceId = sid, itemId = itemId, status = SpaceItemStatus.SUGGESTED.wire)).await()
         }
     }
 
@@ -291,13 +307,11 @@ class SpaceRepository(
         val user = uid ?: return
         val existing = spaceItems.whereEqualTo("spaceId", spaceId).get().await()
             .toObjects(SpaceItem::class.java).map { it.itemId }.toSet()
-        val added = mutableListOf<String>()
-        for (id in itemIds) {
-            if (id in existing) continue
+        val added = itemIds.filter { it !in existing }
+        grantSpaceVisibility(added, spaceId) // before the rows land — see the note on grantSpaceVisibility
+        for (id in added) {
             spaceItems.document("${spaceId}_$id").set(SpaceItem(userId = user, spaceId = spaceId, itemId = id, status = SpaceItemStatus.SUGGESTED.wire)).await()
-            added += id
         }
-        grantSpaceVisibility(added, spaceId)
     }
 
     suspend fun acceptSuggestion(membershipId: String) {
@@ -327,16 +341,18 @@ class SpaceRepository(
 
     suspend fun addItemToSpace(itemId: String, spaceId: String) {
         val user = requireNotNull(uid) { "Not signed in" }
+        // Grant first — see the ordering note on grantSpaceVisibility.
+        grantSpaceVisibility(listOf(itemId), spaceId)
         // Deterministic id → idempotent: promotes a suggested row to saved, or creates one, never dupes.
         spaceItems.document("${spaceId}_$itemId")
             .set(SpaceItem(userId = user, spaceId = spaceId, itemId = itemId, status = SpaceItemStatus.SAVED.wire)).await()
-        grantSpaceVisibility(listOf(itemId), spaceId)
     }
 
-    /** Multi-select "add to shelf": one batch for the memberships, one visibility grant for the lot. */
+    /** Multi-select "add to shelf": one visibility grant for the lot, then one batch for the memberships. */
     suspend fun addItemsToSpace(itemIds: Collection<String>, spaceId: String) {
         if (itemIds.isEmpty()) return
         val user = requireNotNull(uid) { "Not signed in" }
+        grantSpaceVisibility(itemIds, spaceId) // before the rows land — see the note on grantSpaceVisibility
         val batch = db.batch()
         itemIds.forEach { itemId ->
             batch.set(
@@ -345,7 +361,6 @@ class SpaceRepository(
             )
         }
         batch.commit().await()
-        grantSpaceVisibility(itemIds, spaceId)
     }
 
     suspend fun removeMembership(membershipId: String) {
