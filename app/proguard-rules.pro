@@ -1,10 +1,17 @@
-# Firestore deserializes these model classes reflectively (toObject/toObjects) — keep the class
-# names, fields, getters, and the synthesized no-arg constructor, or reads come back null/blank.
--keep class com.wolfeleo2.thingy.data.Item { *; }
--keep class com.wolfeleo2.thingy.data.Space { *; }
--keep class com.wolfeleo2.thingy.data.SpaceItem { *; }
--keep class com.wolfeleo2.thingy.data.Intent { *; }
--keep class com.wolfeleo2.thingy.data.Product { *; }
+# Firestore maps these model classes reflectively, both ways: toObject() needs the synthesized
+# no-arg constructor, and set() derives document field keys from getter/field *names* — obfuscate
+# either and reads come back blank while writes land under garbage keys.
+#
+# Package-wide on purpose. This was an explicit per-class list and it rotted: SpaceMember/SpaceInvite
+# were added for shared spaces, nobody updated the list, and release builds crashed on the first
+# members read. keepclassmembers (not keep) only applies to classes R8 already retains, so unused
+# classes still get stripped — the rule can't rot but doesn't bloat the APK either.
+-keepclassmembers class com.wolfeleo2.thingy.data.** {
+    <init>();
+    <fields>;
+    *** get*();
+    void set*(***);
+}
 
 # Firestore annotations on the models (@DocumentId / @ServerTimestamp) must survive.
 -keepattributes *Annotation*,Signature

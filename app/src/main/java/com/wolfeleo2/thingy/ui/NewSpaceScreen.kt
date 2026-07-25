@@ -183,7 +183,7 @@ private fun NewSpaceContent(
         topBar = {
             TopAppBar(
                 title = { Text(if (editing) "Edit space" else "New space") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                navigationIcon = { AppBarAction(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", onClick = onBack) },
             )
         },
     ) { padding ->

@@ -111,7 +111,14 @@ fun SettingsScreen(
         topBar = {
             TopAppBar(
                 title = { Text("Profile") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                navigationIcon = {
+                    AppBarAction(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        onClick = onBack,
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
+                },
             )
         },
     ) { padding ->

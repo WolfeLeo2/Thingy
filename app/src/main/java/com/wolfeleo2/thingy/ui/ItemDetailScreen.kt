@@ -54,9 +54,9 @@ import androidx.compose.material3.ElevatedAssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -227,7 +227,14 @@ fun ItemDetailScreen(
                         titleContentColor = onSurface,
                         actionIconContentColor = onSurface
                     ),
-                    navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                    navigationIcon = {
+                        AppBarAction(
+                            icon = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            onClick = onBack,
+                            modifier = Modifier.padding(start = 8.dp)
+                        )
+                    },
                     title = {
                         val item = activeItem
                         if (item != null) {
@@ -245,8 +252,8 @@ fun ItemDetailScreen(
                         }
                     },
                     actions = {
-                        Box {
-                            IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "More") }
+                        Box(Modifier.padding(end = 8.dp)) {
+                            AppBarAction(icon = Icons.Filled.MoreVert, contentDescription = "More", onClick = { menu = true })
                             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                                 DropdownMenuItem(
                                     text = { Text(if (snoozedAt != null) "Change reminder" else "Remind me later") },
@@ -287,8 +294,8 @@ fun ItemDetailScreen(
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.weight(1f),
                         )
-                        IconButton(onClick = {
-                            val id = activeId ?: return@IconButton
+                        FilledTonalIconButton(onClick = {
+                            val id = activeId ?: return@FilledTonalIconButton
                             ReminderManager.cancelSnooze(detailContext, id)
                             scope.launch { settings.unsnoozeItem(id) }
                         }) {

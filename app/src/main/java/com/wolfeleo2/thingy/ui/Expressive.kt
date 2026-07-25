@@ -1,5 +1,6 @@
 package com.wolfeleo2.thingy.ui
 
+import android.graphics.drawable.shapes.OvalShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -10,6 +11,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -18,7 +21,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonShapes
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -34,6 +39,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Matrix
 import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -47,6 +53,29 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wolfeleo2.thingy.data.Classifier
 import com.wolfeleo2.thingy.data.SpaceRepository
 import kotlinx.coroutines.launch
+
+/**
+ * Shared Top App Bar action button: encapsulated tonal container with press-morphing shapes.
+ * Use this globally to ensure consistency and a premium skeuomorphic feel.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun AppBarAction(
+    icon: ImageVector,
+    contentDescription: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    FilledTonalIconButton(
+        onClick = onClick,
+        enabled = enabled,
+        shapes = IconButtonDefaults.shapes(),
+        modifier = modifier
+    ) {
+        Icon(icon, contentDescription = contentDescription)
+    }
+}
 
 /** A Compose [Shape] from a Material [RoundedPolygon] (static — no morph). */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)

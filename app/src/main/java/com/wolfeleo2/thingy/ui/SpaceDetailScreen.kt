@@ -98,7 +98,7 @@ fun SpaceDetailScreen(
         topBar = {
             TopAppBar(
                 title = { Text(space?.name ?: "Space", fontWeight = FontWeight.ExtraBold) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                navigationIcon = { AppBarAction(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", onClick = onBack) },
                 actions = {
                     MemberAvatarStack(members = members, onClick = { showMembers = true })
                     if (suggested.isNotEmpty()) {
@@ -163,7 +163,7 @@ fun SpaceDetailScreen(
                         }
                     }
                     Box {
-                        IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "More") }
+                        AppBarAction(icon = Icons.Filled.MoreVert, contentDescription = "More", onClick = { menu = true })
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                             DropdownMenuItem(
                                 text = { Text("Edit shelf") },
