@@ -1,30 +1,46 @@
 package com.wolfeleo2.thingy.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
+import androidx.compose.material3.carousel.rememberCarouselState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -33,33 +49,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
-import androidx.compose.material3.carousel.rememberCarouselState
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
-import com.wolfeleo2.thingy.ui.theme.ThingyTheme
-import androidx.compose.material3.Surface
-import com.wolfeleo2.thingy.data.ItemRepository
 import com.wolfeleo2.thingy.data.Classifier
-import com.wolfeleo2.thingy.data.SpaceRepository
-import com.wolfeleo2.thingy.ui.previewUrl
+import com.wolfeleo2.thingy.data.ItemRepository
 import com.wolfeleo2.thingy.data.ItemType
-import androidx.compose.material.icons.filled.PlayArrow
+import com.wolfeleo2.thingy.data.SpaceRepository
+import com.wolfeleo2.thingy.ui.theme.ThingyTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -89,6 +89,9 @@ fun NewSpaceScreen(
     var dynamic by remember { mutableStateOf(true) }
     var loaded by remember { mutableStateOf(!editing) }
     val selectedItems = remember { mutableStateListOf<String>() }
+    var showJoinDialog by remember { mutableStateOf(false) }
+    var joinCode by remember { mutableStateOf("") }
+    var joinFailed by remember { mutableStateOf(false) }
 
     LaunchedEffect(existing) {
         if (editing && existing != null && !loaded) {
@@ -124,8 +127,38 @@ fun NewSpaceScreen(
             }
             onDone()
         },
+        onJoinClick = { showJoinDialog = true },
         onBack = onDone,
     )
+
+    if (showJoinDialog) {
+        AlertDialog(
+            onDismissRequest = { showJoinDialog = false },
+            title = { Text("Join a space") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = joinCode,
+                        onValueChange = { joinCode = it.trim().uppercase(); joinFailed = false },
+                        singleLine = true,
+                        label = { Text("Invite code") },
+                    )
+                    if (joinFailed) {
+                        Text("Invalid code", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        val joined = spaceRepository.joinSpaceByCode(joinCode)
+                        if (joined != null) { showJoinDialog = false; onDone() } else joinFailed = true
+                    }
+                }) { Text("Join") }
+            },
+            dismissButton = { TextButton(onClick = { showJoinDialog = false }) { Text("Cancel") } },
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -140,6 +173,7 @@ private fun NewSpaceContent(
     selectedItems: List<String>,
     onSelectItem: (String) -> Unit,
     onDoneClick: () -> Unit,
+    onJoinClick: () -> Unit = {},
     onBack: () -> Unit,
 ) {
     val focus = remember { FocusRequester() }
@@ -265,6 +299,12 @@ private fun NewSpaceContent(
                     .fillMaxWidth()
                     .padding(horizontal = 24.dp),
             ) { Text(if (editing) "Save changes" else "Create space") }
+            if (!editing) {
+                TextButton(
+                    onClick = onJoinClick,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+                ) { Text("Have an invite code?") }
+            }
         }
     }
 }

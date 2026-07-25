@@ -1,11 +1,9 @@
 package com.wolfeleo2.thingy.ui
 
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -51,7 +49,6 @@ import com.wolfeleo2.thingy.data.Item
 import com.wolfeleo2.thingy.data.ItemType
 
 
-
 // Each card fills this fraction of the (ratio-shaped) stack area; the margin lets the
 // tilted cards behind peek out without clipping (Amber's COVER_SCALE).
 private const val COVER_SCALE = 0.82f
@@ -78,7 +75,10 @@ fun CoverStack(
     onClick: () -> Unit,
     onEdit: () -> Unit,
     onShare: () -> Unit,
+    onInvite: () -> Unit,
     onDelete: () -> Unit,
+    isOwner: Boolean = true,
+    onLeave: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -151,7 +151,11 @@ fun CoverStack(
                         onClick = { menu = false; onShare() },
                     )
                     DropdownMenuItem(
-                        text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                        text = { Text("Invite") },
+                        onClick = { menu = false; onInvite() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (isOwner) "Delete" else "Leave", color = MaterialTheme.colorScheme.error) },
                         onClick = { menu = false; confirm = true },
                     )
                 }
@@ -162,9 +166,18 @@ fun CoverStack(
     if (confirm) {
         AlertDialog(
             onDismissRequest = { confirm = false },
-            title = { Text("Delete \"$name\"?") },
-            text = { Text("Your saves stay in Home — only the shelf goes away.") },
-            confirmButton = { TextButton(onClick = { confirm = false; onDelete() }) { Text("Delete") } },
+            title = { Text(if (isOwner) "Delete \"$name\"?" else "Leave \"$name\"?") },
+            text = {
+                Text(
+                    if (isOwner) "Your saves stay in Home — only the shelf goes away."
+                    else "You'll lose access to this shared space.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { confirm = false; if (isOwner) onDelete() else onLeave() }) {
+                    Text(if (isOwner) "Delete" else "Leave")
+                }
+            },
             dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } },
         )
     }

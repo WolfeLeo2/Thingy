@@ -2,12 +2,16 @@ package com.wolfeleo2.thingy.data
 
 import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FieldPath
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 
 class ItemRepository(
     private val db: FirebaseFirestore = FirebaseFirestore.getInstance(),
@@ -16,6 +20,7 @@ class ItemRepository(
     private val uid: String? get() = auth.currentUser?.uid
     private val items get() = db.collection("items")
     private val spaceItems get() = db.collection("spaceItems")
+    private val spaces get() = db.collection("spaces")
 
     fun items(): Flow<List<Item>> = callbackFlow {
         val user = uid ?: run { trySend(emptyList()); awaitClose { }; return@callbackFlow }
@@ -27,6 +32,21 @@ class ItemRepository(
                 else trySend(snap?.toObjects(Item::class.java).orEmpty())
             }
         awaitClose { reg.remove() }
+    }
+
+    /** Fetches items by id regardless of owner — for a shared space's items added by other members. */
+    fun itemsByIds(ids: List<String>): Flow<List<Item>> {
+        if (ids.isEmpty()) return flowOf(emptyList())
+        val chunkFlows = ids.chunked(30).map { chunk ->
+            callbackFlow {
+                val reg = items.whereIn(FieldPath.documentId(), chunk).addSnapshotListener { snap, err ->
+                    if (err != null) { Log.w("Thingy", "itemsByIds listen failed", err); trySend(emptyList()) }
+                    else trySend(snap?.toObjects(Item::class.java).orEmpty())
+                }
+                awaitClose { reg.remove() }
+            }
+        }
+        return combine(chunkFlows) { chunks -> chunks.flatMap { it } }
     }
 
     fun item(id: String): Flow<Item?> = callbackFlow {
@@ -81,11 +101,13 @@ class ItemRepository(
 
     private suspend fun create(base: Item, spaceId: String?): String {
         val user = requireNotNull(uid) { "Not signed in" }
-        val item = base.copy(userId = user, status = ItemStatus.PROCESSING.wire)
+        val item = base.copy(userId = user, status = ItemStatus.PROCESSING.wire, visibleTo = listOf(user))
         val ref = items.add(item).await()
         if (spaceId != null) {
             spaceItems.document("${spaceId}_${ref.id}")
                 .set(SpaceItem(userId = user, spaceId = spaceId, itemId = ref.id, status = SpaceItemStatus.SAVED.wire)).await()
+            val memberIds = spaces.document(spaceId).get().await().toObject(Space::class.java)?.memberIds.orEmpty()
+            if (memberIds.isNotEmpty()) items.document(ref.id).update("visibleTo", FieldValue.arrayUnion(*memberIds.toTypedArray())).await()
         }
         return ref.id
     }
@@ -171,6 +193,14 @@ class ItemRepository(
     }
 
     /** Permanently delete an item + its space memberships + its local image file. */
+    /**
+     * Multi-select delete. Sequential on purpose: [delete] also reaps the Cloudinary asset and local
+     * files per item, so there's nothing to batch — one failure shouldn't abandon the rest.
+     */
+    suspend fun deleteAll(ids: Collection<String>) {
+        ids.forEach { id -> runCatching { delete(id) }.onFailure { Log.w("Thingy", "delete($id) failed", it) } }
+    }
+
     suspend fun delete(id: String) {
         val user = uid
         // Cascade: remove every spaceItems membership for this item.
@@ -182,17 +212,25 @@ class ItemRepository(
                 batch.commit().await()
             }
         }
-        // Delete the local image file if one exists.
+        // Delete the local image file if one exists, and the Cloudinary asset (if any).
         runCatching {
-            val storagePath = items.document(id).get().await().getString("storagePath")
+            val doc = items.document(id).get().await()
+            val storagePath = doc.getString("storagePath")
             if (storagePath != null) java.io.File(storagePath).delete()
-            
+
             // Clean up synced/offline copies in the saved directory
             val context = com.google.firebase.FirebaseApp.getInstance().applicationContext
             val savedDir = java.io.File(context.filesDir, "saved")
             java.io.File(savedDir, "$id.webp").delete()
             java.io.File(savedDir, "$id.mp4").delete()
             java.io.File(savedDir, "$id.media").delete()
+
+            val imageUrl = doc.getString("imageUrl")
+            val publicId = imageUrl?.let { cloudinaryPublicIdFrom(it) }
+            if (publicId != null) {
+                val resourceType = if (doc.getString("type") == ItemType.VIDEO.wire) "video" else "image"
+                deleteFromCloudinary(publicId, resourceType)
+            }
         }
         items.document(id).delete().await()
     }

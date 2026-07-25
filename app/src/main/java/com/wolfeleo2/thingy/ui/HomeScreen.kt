@@ -3,30 +3,18 @@ package com.wolfeleo2.thingy.ui
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.staggeredgrid.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialShapes
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -37,10 +25,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wolfeleo2.thingy.data.Classifier
 import com.wolfeleo2.thingy.data.Item
@@ -64,6 +49,10 @@ internal fun HomeFeed(
     animatedVisibilityScope: AnimatedVisibilityScope,
     onOpenItem: (List<String>, Int) -> Unit,
     onAddToSpace: (String) -> Unit,
+    // Selection is owned by MainShell so the floating toolbar (which lives there, above this content)
+    // can morph into the contextual action bar.
+    selectedIds: Set<String>,
+    onToggleSelect: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val items by library.items.collectAsStateWithLifecycle()
@@ -72,6 +61,7 @@ internal fun HomeFeed(
     val resurfacedId by settings.resurfacedItemId.collectAsStateWithLifecycle(null)
     var snoozeTarget by remember { mutableStateOf<Item?>(null) }
     val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(Unit) {
         ReminderManager.scheduleDailyResurface(context)
@@ -105,19 +95,23 @@ internal fun HomeFeed(
                     onDismiss = { scope.launch { settings.dismissResurfacing() } }
                 )
             }
-            suggestion?.let { s ->
-                SpaceSuggestionCard(
-                    suggestion = s,
-                    onCreate = {
-                        burstTrigger++
-                        scope.launch {
-                            val spaceId = spaceRepository.createSpace(name = s.tag.replaceFirstChar { it.uppercase() }, dynamic = true)
-                            s.itemIds.forEach { id -> spaceRepository.addItemToSpace(id, spaceId) }
-                            classifier.recommendForSpace(spaceId)
-                        }
-                    },
-                    onDismiss = { scope.launch { settings.dismissSuggestion(s.tag) } },
+            LaunchedEffect(suggestion?.tag) {
+                val s = suggestion ?: return@LaunchedEffect
+                val result = snackbarHostState.showSnackbar(
+                    message = "Create a \"${s.tag.replaceFirstChar { it.uppercase() }}\" space?",
+                    actionLabel = "Create",
+                    withDismissAction = true,
+                    duration = SnackbarDuration.Indefinite,
                 )
+                when (result) {
+                    SnackbarResult.ActionPerformed -> {
+                        burstTrigger++
+                        val spaceId = spaceRepository.createSpace(name = s.tag.replaceFirstChar { it.uppercase() }, dynamic = true)
+                        s.itemIds.forEach { id -> spaceRepository.addItemToSpace(id, spaceId) }
+                        classifier.recommendForSpace(spaceId)
+                    }
+                    SnackbarResult.Dismissed -> settings.dismissSuggestion(s.tag)
+                }
             }
             Box(Modifier.weight(1f)) {
                 Grid {
@@ -130,6 +124,9 @@ internal fun HomeFeed(
                             modifier = Modifier.animateItem(),
                             onAddToSpace = { onAddToSpace(item.id) },
                             onDelete = { scope.launch { itemRepository.delete(item.id) } },
+                            selectionActive = selectedIds.isNotEmpty(),
+                            selected = item.id in selectedIds,
+                            onToggleSelect = { onToggleSelect(item.id) },
                         )
                     }
                 }
@@ -138,59 +135,14 @@ internal fun HomeFeed(
 
         ShapeBurstEffect(trigger = burstTrigger)
 
+        SnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
+
         snoozeTarget?.let { target ->
             SnoozeSheet(
                 item = target,
                 settings = settings,
                 onDismiss = { snoozeTarget = null }
             )
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun SpaceSuggestionCard(
-    suggestion: SpaceSuggestion,
-    onCreate: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.primaryContainer,
-        shape = RoundedCornerShape(24.dp),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-    ) {
-        Column {
-            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(44.dp).clip(rememberMaterialShape(MaterialShapes.Sunny))
-                        .background(MaterialTheme.colorScheme.primary),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Filled.AutoAwesome, contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(20.dp))
-                }
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "Create a \"${suggestion.tag.replaceFirstChar { it.uppercase() }}\" space?",
-                        style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                    Text(
-                        "${suggestion.itemIds.size} saves would fit right in",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
-                    )
-                }
-            }
-            Row(
-                Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                TextButton(onClick = onDismiss) { Text("Not now") }
-                Button(onClick = onCreate, shapes = expressiveButtonShapes()) { Text("Create") }
-            }
         }
     }
 }

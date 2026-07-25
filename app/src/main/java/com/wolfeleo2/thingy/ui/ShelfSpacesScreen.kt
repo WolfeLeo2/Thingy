@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,13 +19,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -64,6 +64,7 @@ import androidx.graphics.shapes.RoundedPolygon
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.wolfeleo2.thingy.data.Item
+import com.wolfeleo2.thingy.data.ItemRepository
 import com.wolfeleo2.thingy.data.ItemType
 import com.wolfeleo2.thingy.data.Space
 import com.wolfeleo2.thingy.data.SpaceItem
@@ -85,14 +86,15 @@ private fun decorShapeFor(seed: String, slot: Int): RoundedPolygon {
 fun ShelfSpacesScreen(
     library: LibraryViewModel,
     spaceRepository: SpaceRepository,
+    itemRepository: ItemRepository,
     onOpenSpace: (String) -> Unit,
     onEdit: (String?) -> Unit,
     onShare: (Space) -> Unit,
+    onInvite: (Space) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val myUid = spaceRepository.currentUserId
     val spaces by library.spaces.collectAsStateWithLifecycle()
-    val memberships by library.memberships.collectAsStateWithLifecycle()
-    val items by library.items.collectAsStateWithLifecycle()
 
     val spaceList = spaces ?: return // loading
     if (spaceList.isEmpty()) {
@@ -106,7 +108,6 @@ fun ShelfSpacesScreen(
         )
         return
     }
-    val itemById = items.orEmpty().associateBy { it.id }
 
     LazyColumn(
         contentPadding = PaddingValues(top = 12.dp, bottom = 96.dp),
@@ -114,11 +115,17 @@ fun ShelfSpacesScreen(
         modifier = Modifier.fillMaxSize(),
     ) {
         items(spaceList, key = { it.id }) { space ->
-            val spaceMemberships = memberships.filter { it.spaceId == space.id && it.status != SpaceItemStatus.DISMISSED.wire }
-            val covers = spaceMemberships
+            // spaceId-scoped (not the owner-only library flows) so a shared space's covers show
+            // items added by any member, not just the ones this user personally saved.
+            val spaceMemberships by remember(space.id) { spaceRepository.membershipsForSpace(space.id) }.collectAsStateWithLifecycle(emptyList())
+            val live = spaceMemberships.filter { it.status != SpaceItemStatus.DISMISSED.wire }
+            val itemIds = remember(live) { live.map { it.itemId } }
+            val spaceItems by remember(itemIds) { itemRepository.itemsByIds(itemIds) }.collectAsStateWithLifecycle(emptyList())
+            val itemById = spaceItems.associateBy { it.id }
+            val covers = live
                 .mapNotNull { m -> itemById[m.itemId]?.let { item -> m to item } }
                 .sortedByDescending { it.second.createdAt?.time ?: 0L }
-            val hasSuggestions = spaceMemberships.any { it.status == SpaceItemStatus.SUGGESTED.wire }
+            val hasSuggestions = live.any { it.status == SpaceItemStatus.SUGGESTED.wire }
             ShelfRow(
                 space = space,
                 covers = covers,
@@ -127,7 +134,10 @@ fun ShelfSpacesScreen(
                 onOpenSpace = onOpenSpace,
                 onEdit = onEdit,
                 onShare = onShare,
+                onInvite = onInvite,
                 onDelete = { scope.launch { spaceRepository.deleteSpace(space.id) } },
+                isOwner = space.userId == myUid,
+                onLeave = { myUid?.let { u -> scope.launch { spaceRepository.removeMember(space.id, u) } } },
             )
         }
     }
@@ -143,7 +153,10 @@ private fun ShelfRow(
     onOpenSpace: (String) -> Unit,
     onEdit: (String?) -> Unit,
     onShare: (Space) -> Unit,
+    onInvite: (Space) -> Unit,
     onDelete: () -> Unit,
+    isOwner: Boolean,
+    onLeave: () -> Unit,
 ) {
     val context = LocalContext.current
     val isDark = isSystemInDarkTheme()
@@ -202,8 +215,9 @@ private fun ShelfRow(
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(text = { Text("Edit shelf") }, onClick = { menu = false; onEdit(space.id) })
                     DropdownMenuItem(text = { Text("Share collage") }, onClick = { menu = false; onShare(space) })
+                    DropdownMenuItem(text = { Text("Invite") }, onClick = { menu = false; onInvite(space) })
                     DropdownMenuItem(
-                        text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                        text = { Text(if (isOwner) "Delete" else "Leave", color = MaterialTheme.colorScheme.error) },
                         onClick = { menu = false; confirm = true },
                     )
                 }
@@ -309,9 +323,18 @@ private fun ShelfRow(
     if (confirm) {
         AlertDialog(
             onDismissRequest = { confirm = false },
-            title = { Text("Delete \"${space.name}\"?") },
-            text = { Text("Your saves stay in Home — only the shelf goes away.") },
-            confirmButton = { TextButton(onClick = { confirm = false; onDelete() }) { Text("Delete") } },
+            title = { Text(if (isOwner) "Delete \"${space.name}\"?" else "Leave \"${space.name}\"?") },
+            text = {
+                Text(
+                    if (isOwner) "Your saves stay in Home — only the shelf goes away."
+                    else "You'll lose access to this shared space.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { confirm = false; if (isOwner) onDelete() else onLeave() }) {
+                    Text(if (isOwner) "Delete" else "Leave")
+                }
+            },
             dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } },
         )
     }

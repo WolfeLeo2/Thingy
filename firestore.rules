@@ -1,33 +1,75 @@
 rules_version = '2';
-// Single-user data scope: every read/write is scoped to the signed-in user.
-// Single-user + free plan: classification runs on-device (no Cloud Functions), so the
-// owner is the trusted classifier and may write any spaceItems.status. Ownership is the
-// only invariant.
+// Items and spaceItems are still owner-only (classification runs on-device, so the owner
+// is the trusted classifier). Spaces are shared: access is via memberIds, not userId —
+// see [[thingy-shared-spaces-wanted]] memory. spaceItems content-sharing across members
+// is a follow-up (items collection would need its own visibility rework).
 service cloud.firestore {
   match /databases/{database}/documents {
 
     function signedIn() { return request.auth != null; }
     function ownsExisting() { return signedIn() && resource.data.userId == request.auth.uid; }
     function ownsIncoming() { return signedIn() && request.resource.data.userId == request.auth.uid; }
+    function isMember(spaceId) {
+      return request.auth.uid in get(/databases/$(database)/documents/spaces/$(spaceId)).data.memberIds;
+    }
+    function isOwner(spaceId) {
+      return get(/databases/$(database)/documents/spaces/$(spaceId)).data.userId == request.auth.uid;
+    }
+
     match /items/{id} {
-      allow read: if ownsExisting();
+      // visibleTo is the denormalized union of memberIds across every shared space the item is in
+      allow read: if signedIn() && (resource.data.userId == request.auth.uid || request.auth.uid in resource.data.visibleTo);
       allow create: if ownsIncoming();
-      allow update: if ownsExisting() && ownsIncoming();
+      // owner can edit anything; anyone who can already see the item (or is granting/removing
+      // *themself*, e.g. joining/leaving a shared space) may touch visibleTo and nothing else
+      allow update: if (ownsExisting() && ownsIncoming()) || (
+        signedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['visibleTo']) && (
+          request.auth.uid in resource.data.visibleTo ||
+          (!(request.auth.uid in resource.data.visibleTo) && request.auth.uid in request.resource.data.visibleTo)
+        )
+      );
       allow delete: if ownsExisting();
     }
 
     match /spaces/{id} {
-      allow read: if ownsExisting();
-      allow create: if ownsIncoming();
-      allow update: if ownsExisting() && ownsIncoming();
+      // owner fallback covers pre-sharing docs that haven't been backfilled with memberIds yet
+      allow read: if signedIn() && (resource.data.userId == request.auth.uid || request.auth.uid in resource.data.memberIds);
+      allow create: if signedIn() && request.resource.data.memberIds == [request.auth.uid]
+        && request.resource.data.userId == request.auth.uid;
+      // owner can edit freely; a non-owner may edit while remaining a member, or add/remove *themself* (join/leave)
+      allow update: if signedIn() && (
+        resource.data.userId == request.auth.uid ||
+        (request.auth.uid in resource.data.memberIds && request.auth.uid in request.resource.data.memberIds) ||
+        (!(request.auth.uid in resource.data.memberIds) && request.auth.uid in request.resource.data.memberIds
+          && request.resource.data.memberIds.size() == resource.data.memberIds.size() + 1) ||
+        (request.auth.uid in resource.data.memberIds && !(request.auth.uid in request.resource.data.memberIds)
+          && request.resource.data.memberIds.size() == resource.data.memberIds.size() - 1)
+      );
       allow delete: if ownsExisting();
     }
 
+    match /spaceMembers/{id} {
+      allow read: if signedIn() && isMember(resource.data.spaceId);
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid && isMember(request.resource.data.spaceId);
+      allow update: if signedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if signedIn() && (resource.data.userId == request.auth.uid || isOwner(resource.data.spaceId));
+    }
+
+    match /invites/{code} {
+      allow read: if signedIn();
+      // any member can mint an invite (the Invite action lives in every member's menu), not just the owner
+      allow create: if signedIn() && isMember(request.resource.data.spaceId);
+      allow delete: if signedIn() && isMember(resource.data.spaceId);
+    }
+
     match /spaceItems/{id} {
-      allow read: if ownsExisting();
-      allow create: if ownsIncoming();
-      allow update: if ownsExisting() && ownsIncoming();
-      allow delete: if ownsExisting();
+      // shared content: any current member of the space may read/write its rows, not just the adder.
+      // ownsExisting() fallback covers the userId-only global memberships() listen (LibraryViewModel),
+      // which has no spaceId in its query so isMember() alone can't authorize it.
+      allow read: if signedIn() && (isMember(resource.data.spaceId) || ownsExisting());
+      allow create: if signedIn() && isMember(request.resource.data.spaceId) && request.resource.data.userId == request.auth.uid;
+      allow update: if signedIn() && isMember(resource.data.spaceId) && isMember(request.resource.data.spaceId);
+      allow delete: if signedIn() && isMember(resource.data.spaceId);
     }
   }
 }

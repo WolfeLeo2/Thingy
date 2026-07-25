@@ -4,6 +4,8 @@ import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.BoundsTransform
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -15,23 +17,20 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NorthEast
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -44,14 +43,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.platform.LocalContext
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import com.wolfeleo2.thingy.data.Item
@@ -114,12 +115,24 @@ fun ItemCard(
     onDismiss: (() -> Unit)? = null,
     onRemove: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
+    // Multi-select: [onToggleSelect] non-null makes long-press start a selection instead of opening
+    // the overflow menu (which stays as the single-item path), and tap toggles once a selection is live.
+    selectionActive: Boolean = false,
+    selected: Boolean = false,
+    onToggleSelect: (() -> Unit)? = null,
 ) {
     var menu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val hasMenu = onAccept != null || onAddToSpace != null || onDismiss != null || onRemove != null || onDelete != null
     val motionSpec = MaterialTheme.motionScheme.defaultSpatialSpec<Rect>()
     val hasImage = item.previewUrl() != null
+    val haptics = LocalHapticFeedback.current
+    // Selected cards shrink back a touch so the grid reads as "picked up" (Expressive tactility).
+    val selectScale by animateFloatAsState(
+        if (selected) 0.93f else 1f,
+        MaterialTheme.motionScheme.fastSpatialSpec(),
+        label = "select",
+    )
 
     // Image items: morph the framed image (white border / die-cut and all) card↔hero.
     // Text items (no image): morph the whole card container, so they animate in too.
@@ -129,7 +142,7 @@ fun ItemCard(
             Modifier.sharedElement(
                 rememberSharedContentState(key = "item-image-${item.id}"),
                 animatedVisibilityScope = animatedVisibilityScope,
-                boundsTransform = BoundsTransform { _, _ -> motionSpec },
+                boundsTransform = { _, _ -> motionSpec },
             )
         }
     } else Modifier
@@ -149,8 +162,17 @@ fun ItemCard(
             modifier
                 .then(containerShared)
                 .fillMaxWidth()
+                .graphicsLayer { scaleX = selectScale; scaleY = selectScale }
                 .clip(RoundedCornerShape(16.dp))
-                .combinedClickable(onClick = onClick, onLongClick = { if (hasMenu) menu = true }),
+                .combinedClickable(
+                    onClick = { if (selectionActive && onToggleSelect != null) onToggleSelect() else onClick() },
+                    onLongClick = {
+                        if (onToggleSelect != null) {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onToggleSelect()
+                        } else if (hasMenu) menu = true
+                    },
+                ),
         ) {
             Box {
                 val url: Any? = item.previewUrl()
@@ -178,8 +200,25 @@ fun ItemCard(
                         )
                     }
                 }
+                if (selectionActive) {
+                    // Empty ring for unpicked, filled check for picked — the whole grid reads as a
+                    // checklist the moment a selection starts.
+                    Surface(
+                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.scrim.copy(alpha = 0.35f),
+                        border = BorderStroke(1.5.dp, if (selected) MaterialTheme.colorScheme.primary else Color.White),
+                        shape = CircleShape,
+                        modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Check,
+                            contentDescription = if (selected) "Selected" else "Not selected",
+                            tint = if (selected) MaterialTheme.colorScheme.onPrimary else Color.White,
+                            modifier = Modifier.padding(4.dp).size(16.dp),
+                        )
+                    }
+                }
             }
-            Caption(item, onMore = { if (hasMenu) menu = true })
+            Caption(item, onMore = { if (hasMenu) menu = true }, showMore = hasMenu && !selectionActive)
         }
 
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -266,7 +305,7 @@ private fun TextFace(item: Item) {
 }
 
 @Composable
-private fun Caption(item: Item, onMore: () -> Unit) {
+private fun Caption(item: Item, onMore: () -> Unit, showMore: Boolean = true) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -286,13 +325,15 @@ private fun Caption(item: Item, onMore: () -> Unit) {
                 }
             }
         }
-        IconButton(onClick = onMore, modifier = Modifier.size(24.dp)) {
-            Icon(
-                Icons.Filled.MoreVert,
-                contentDescription = "More",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(16.dp)
-            )
+        if (showMore) {
+            IconButton(onClick = onMore, modifier = Modifier.size(24.dp)) {
+                Icon(
+                    Icons.Filled.MoreVert,
+                    contentDescription = "More",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
         }
     }
 }

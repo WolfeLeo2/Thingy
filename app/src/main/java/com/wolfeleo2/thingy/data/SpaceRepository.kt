@@ -2,26 +2,62 @@ package com.wolfeleo2.thingy.data
 
 import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 
-// NOTE: every spaceItems query is scoped `userId ==` first — the security rule only permits
-// list queries constrained to the owner's docs. (Equality-only, so no composite indexes needed.)
+// NOTE: spaceItems queries scoped to a *space* (not an item) are spaceId-only — any member of
+// the space may read/write its rows. Queries scoped to an *item*'s own steering (suggestSpaces,
+// snapshotSavedSpaceIdsForItem) stay userId-scoped since only the owning device's classifier runs them.
 class SpaceRepository(
     private val db: FirebaseFirestore = FirebaseFirestore.getInstance(),
     private val auth: FirebaseAuth = FirebaseAuth.getInstance(),
 ) {
     private val uid: String? get() = auth.currentUser?.uid
+    val currentUserId: String? get() = uid
     private val spaces get() = db.collection("spaces")
     private val spaceItems get() = db.collection("spaceItems")
+    private val spaceMembers get() = db.collection("spaceMembers")
+    private val invites get() = db.collection("invites")
+    private val items get() = db.collection("items")
+
+    /** Grants every member of [spaceId] read access to [itemIds] (denormalized onto Item.visibleTo). */
+    private suspend fun grantSpaceVisibility(itemIds: Collection<String>, spaceId: String) {
+        if (itemIds.isEmpty()) return
+        val memberIds = spaces.document(spaceId).get().await().toObject(Space::class.java)?.memberIds.orEmpty()
+        if (memberIds.isEmpty()) return
+        val batch = db.batch()
+        itemIds.forEach { batch.update(items.document(it), "visibleTo", FieldValue.arrayUnion(*memberIds.toTypedArray())) }
+        batch.commit().await()
+    }
+
+    // ponytail: recomputeItemVisibility does one read per space-membership + one write per item on every
+    // leave/removal (N+1, no batching across items). Fine at hobby-app item counts; if a space ever hits
+    // hundreds of items, move this to a Cloud Function triggered off spaceMembers/spaceItems writes.
+    //
+    // It's also fail-soft by necessity: `spaceItems where itemId==` is rejected outright when the item
+    // also sits in a space the caller isn't a member of (rules evaluate the read per result doc), so an
+    // exact recompute needs data the client may not read. A Cloud Function is the real fix; until then a
+    // failed recompute leaves visibleTo stale (over-permissive) rather than crashing the caller.
+    /** Recomputes [itemId]'s visibleTo from scratch: the owner plus every current member of every space it's still in. */
+    private suspend fun recomputeItemVisibility(itemId: String) {
+        runCatching {
+            val ownerUid = items.document(itemId).get().await().getString("userId")
+            val spaceIds = spaceItems.whereEqualTo("itemId", itemId).get().await()
+                .documents.mapNotNull { it.getString("spaceId") }.distinct()
+            val memberIds = spaceIds.flatMap { spaces.document(it).get().await().toObject(Space::class.java)?.memberIds.orEmpty() }
+            val visibleTo = (memberIds + listOfNotNull(ownerUid)).distinct()
+            items.document(itemId).update("visibleTo", visibleTo).await()
+        }.onFailure { Log.w("Thingy", "recomputeItemVisibility($itemId) skipped", it) }
+    }
 
     fun spaces(): Flow<List<Space>> = callbackFlow {
         val user = uid ?: run { trySend(emptyList()); awaitClose { }; return@callbackFlow }
         val reg = spaces
-            .whereEqualTo("userId", user)
+            .whereArrayContains("memberIds", user)
             .orderBy("createdAt", Query.Direction.DESCENDING)
             .addSnapshotListener { snap, err ->
                 if (err != null) { Log.w("Thingy", "spaces listen failed", err); trySend(emptyList()); close() }
@@ -57,10 +93,9 @@ class SpaceRepository(
         awaitClose { reg.remove() }
     }
 
+    /** Every item in [spaceId] regardless of which member added it. */
     fun membershipsForSpace(spaceId: String): Flow<List<SpaceItem>> = callbackFlow {
-        val user = uid ?: run { trySend(emptyList()); awaitClose { }; return@callbackFlow }
         val reg = spaceItems
-            .whereEqualTo("userId", user)
             .whereEqualTo("spaceId", spaceId)
             .addSnapshotListener { snap, err ->
                 if (err != null) { Log.w("Thingy", "space memberships listen failed", err); trySend(emptyList()); close() }
@@ -71,15 +106,91 @@ class SpaceRepository(
 
     suspend fun createSpace(name: String, dynamic: Boolean = true): String {
         val user = requireNotNull(uid) { "Not signed in" }
-        return spaces.add(Space(userId = user, name = name, dynamic = dynamic)).await().id
+        val id = spaces.add(Space(userId = user, name = name, dynamic = dynamic, memberIds = listOf(user))).await().id
+        spaceMembers.document("${id}_$user").set(
+            SpaceMember(spaceId = id, userId = user, role = SpaceRole.OWNER.wire, displayName = auth.currentUser?.displayName, photoUrl = auth.currentUser?.photoUrl?.toString())
+        ).await()
+        return id
+    }
+
+    /** People with access to [spaceId] — the avatar stack / member list. */
+    fun membersForSpace(spaceId: String): Flow<List<SpaceMember>> = callbackFlow {
+        val reg = spaceMembers.whereEqualTo("spaceId", spaceId).addSnapshotListener { snap, err ->
+            if (err != null) { Log.w("Thingy", "space members listen failed", err); trySend(emptyList()); close() }
+            else trySend(snap?.toObjects(SpaceMember::class.java).orEmpty())
+        }
+        awaitClose { reg.remove() }
+    }
+
+    /** Mints a fresh 6-char code, replacing any previous one (old links/QRs stop working). */
+    suspend fun createInviteCode(spaceId: String): String {
+        val code = (1..6).map { "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".random() }.joinToString("")
+        invites.document(code).set(SpaceInvite(spaceId = spaceId)).await()
+        spaces.document(spaceId).update("activeInviteCode", code).await()
+        return code
+    }
+
+    /** Resolves a join code/link and adds the current user as a member. Returns the joined spaceId, or null if invalid. */
+    suspend fun joinSpaceByCode(code: String): String? {
+        val user = requireNotNull(uid) { "Not signed in" }
+        val spaceId = invites.document(code).get().await().getString("spaceId") ?: return null
+        spaces.document(spaceId).update("memberIds", FieldValue.arrayUnion(user)).await()
+        spaceMembers.document("${spaceId}_$user").set(
+            SpaceMember(spaceId = spaceId, userId = user, role = SpaceRole.MEMBER.wire, displayName = auth.currentUser?.displayName, photoUrl = auth.currentUser?.photoUrl?.toString())
+        ).await()
+        // Grant the new member visibility into every item already in the space.
+        val itemIds = spaceItems.whereEqualTo("spaceId", spaceId).get().await().documents.mapNotNull { it.getString("itemId") }.distinct()
+        if (itemIds.isNotEmpty()) {
+            val batch = db.batch()
+            itemIds.forEach { batch.update(items.document(it), "visibleTo", FieldValue.arrayUnion(user)) }
+            batch.commit().await()
+        }
+        return spaceId
+    }
+
+    /** Owner removes another member, or a member removes themself (leave). */
+    suspend fun removeMember(spaceId: String, userId: String) {
+        // Revoke first: once we're out of memberIds the rules stop us reading this space's spaceItems.
+        // ponytail: a plain arrayRemove, not a cross-space recompute — if the same item also lives in
+        // another shared space this user is still in, they wrongly lose it. Needs the Cloud Function
+        // that owns visibleTo (see recomputeItemVisibility); an exact client-side recompute can't read
+        // the other members' spaces anyway. The item's owner keeps access via the rules' ownership check.
+        val itemIds = spaceItems.whereEqualTo("spaceId", spaceId).get().await()
+            .documents.mapNotNull { it.getString("itemId") }.distinct()
+        if (itemIds.isNotEmpty()) {
+            val batch = db.batch()
+            itemIds.forEach { batch.update(items.document(it), "visibleTo", FieldValue.arrayRemove(userId)) }
+            runCatching { batch.commit().await() }
+                .onFailure { Log.w("Thingy", "revoke visibility on leave failed", it) }
+        }
+        spaces.document(spaceId).update("memberIds", FieldValue.arrayRemove(userId)).await()
+        spaceMembers.document("${spaceId}_$userId").delete().await()
     }
 
     suspend fun updateSpace(id: String, name: String, dynamic: Boolean) {
         spaces.document(id).update(mapOf("name" to name, "dynamic" to dynamic)).await()
     }
 
+    /** Deletes the space and cascades: memberships, member docs, its invite code, and visibility grants. */
     suspend fun deleteSpace(id: String) {
+        val space = snapshotSpace(id)
+        val itemDocs = spaceItems.whereEqualTo("spaceId", id).get().await()
+        val itemIds = itemDocs.documents.mapNotNull { it.getString("itemId") }.distinct()
+        val memberDocs = spaceMembers.whereEqualTo("spaceId", id).get().await()
+        // Drop the grants this space handed out before its memberIds become unreadable. Owner keeps
+        // access via the rules' ownership check, so stripping them from visibleTo is safe.
+        val revoked = space?.memberIds.orEmpty()
+        val batch = db.batch()
+        itemDocs.documents.forEach { batch.delete(it.reference) }
+        memberDocs.documents.forEach { batch.delete(it.reference) }
+        if (revoked.isNotEmpty()) {
+            itemIds.forEach { batch.update(items.document(it), "visibleTo", FieldValue.arrayRemove(*revoked.toTypedArray())) }
+        }
+        space?.activeInviteCode?.let { batch.delete(invites.document(it)) }
+        batch.commit().await()
         spaces.document(id).delete().await()
+        // Re-grant from whatever *other* spaces still hold these items (no-op for solo items).
+        itemIds.forEach { recomputeItemVisibility(it) }
     }
 
     /** Persists the shelf-layout board color, seeded from [itemId]'s image — computed once per newest-item change. */
@@ -87,9 +198,25 @@ class SpaceRepository(
         spaces.document(spaceId).update(mapOf("shelfColor" to colorArgb, "shelfColorItemId" to itemId)).await()
     }
 
+    /** One-time backfill for spaces created before sharing existed (no memberIds yet). Safe to re-run. */
+    suspend fun migrateLegacySpacesToMemberIds() {
+        val user = uid ?: return
+        val legacy = spaces.whereEqualTo("userId", user).get().await()
+            .documents.filter { it.get("memberIds") == null }
+        if (legacy.isEmpty()) return
+        val batch = db.batch()
+        legacy.forEach { batch.update(it.reference, "memberIds", listOf(user)) }
+        batch.commit().await()
+        legacy.forEach { doc ->
+            spaceMembers.document("${doc.id}_$user").set(
+                SpaceMember(spaceId = doc.id, userId = user, role = SpaceRole.OWNER.wire, displayName = auth.currentUser?.displayName, photoUrl = auth.currentUser?.photoUrl?.toString())
+            ).await()
+        }
+    }
+
     suspend fun snapshotDynamicSpaces(): List<Space> {
         val user = uid ?: return emptyList()
-        return spaces.whereEqualTo("userId", user).get().await()
+        return spaces.whereArrayContains("memberIds", user).get().await()
             .toObjects(Space::class.java).filter { it.dynamic == true }
     }
 
@@ -106,8 +233,7 @@ class SpaceRepository(
     }
 
     suspend fun snapshotMemberItemIds(spaceId: String): Set<String> {
-        val user = uid ?: return emptySet()
-        return spaceItems.whereEqualTo("userId", user).whereEqualTo("spaceId", spaceId).get().await()
+        return spaceItems.whereEqualTo("spaceId", spaceId).get().await()
             .toObjects(SpaceItem::class.java)
             .filter { it.status != SpaceItemStatus.DISMISSED.wire }.map { it.itemId }.toSet()
     }
@@ -125,12 +251,15 @@ class SpaceRepository(
 
     suspend fun suggestItemsForSpace(spaceId: String, itemIds: List<String>) {
         val user = uid ?: return
-        val existing = spaceItems.whereEqualTo("userId", user).whereEqualTo("spaceId", spaceId).get().await()
+        val existing = spaceItems.whereEqualTo("spaceId", spaceId).get().await()
             .toObjects(SpaceItem::class.java).map { it.itemId }.toSet()
+        val added = mutableListOf<String>()
         for (id in itemIds) {
             if (id in existing) continue
             spaceItems.document("${spaceId}_$id").set(SpaceItem(userId = user, spaceId = spaceId, itemId = id, status = SpaceItemStatus.SUGGESTED.wire)).await()
+            added += id
         }
+        grantSpaceVisibility(added, spaceId)
     }
 
     suspend fun acceptSuggestion(membershipId: String) {
@@ -142,8 +271,7 @@ class SpaceRepository(
     }
 
     suspend fun dismissAll(spaceId: String) {
-        val user = uid ?: return
-        val pending = spaceItems.whereEqualTo("userId", user).whereEqualTo("spaceId", spaceId)
+        val pending = spaceItems.whereEqualTo("spaceId", spaceId)
             .whereEqualTo("status", SpaceItemStatus.SUGGESTED.wire).get().await()
         val batch = db.batch()
         pending.documents.forEach { batch.update(it.reference, "status", SpaceItemStatus.DISMISSED.wire) }
@@ -151,8 +279,7 @@ class SpaceRepository(
     }
 
     suspend fun acceptAll(spaceId: String): List<String> {
-        val user = uid ?: return emptyList()
-        val pending = spaceItems.whereEqualTo("userId", user).whereEqualTo("spaceId", spaceId)
+        val pending = spaceItems.whereEqualTo("spaceId", spaceId)
             .whereEqualTo("status", SpaceItemStatus.SUGGESTED.wire).get().await()
         val batch = db.batch()
         pending.documents.forEach { batch.update(it.reference, "status", SpaceItemStatus.SAVED.wire) }
@@ -165,25 +292,40 @@ class SpaceRepository(
         // Deterministic id → idempotent: promotes a suggested row to saved, or creates one, never dupes.
         spaceItems.document("${spaceId}_$itemId")
             .set(SpaceItem(userId = user, spaceId = spaceId, itemId = itemId, status = SpaceItemStatus.SAVED.wire)).await()
+        grantSpaceVisibility(listOf(itemId), spaceId)
+    }
+
+    /** Multi-select "add to shelf": one batch for the memberships, one visibility grant for the lot. */
+    suspend fun addItemsToSpace(itemIds: Collection<String>, spaceId: String) {
+        if (itemIds.isEmpty()) return
+        val user = requireNotNull(uid) { "Not signed in" }
+        val batch = db.batch()
+        itemIds.forEach { itemId ->
+            batch.set(
+                spaceItems.document("${spaceId}_$itemId"),
+                SpaceItem(userId = user, spaceId = spaceId, itemId = itemId, status = SpaceItemStatus.SAVED.wire),
+            )
+        }
+        batch.commit().await()
+        grantSpaceVisibility(itemIds, spaceId)
     }
 
     suspend fun removeMembership(membershipId: String) {
+        val itemId = spaceItems.document(membershipId).get().await().getString("itemId")
         spaceItems.document(membershipId).delete().await()
+        if (itemId != null) recomputeItemVisibility(itemId)
     }
 
     /** The purpose-steered intents on this item's membership in [spaceId] (empty if none). */
     suspend fun membershipIntents(itemId: String, spaceId: String): List<Intent> {
-        val user = uid ?: return emptyList()
-        return spaceItems.whereEqualTo("userId", user).whereEqualTo("spaceId", spaceId)
+        return spaceItems.whereEqualTo("spaceId", spaceId)
             .whereEqualTo("itemId", itemId).get().await()
             .toObjects(SpaceItem::class.java).firstOrNull()?.intents ?: emptyList()
     }
 
     suspend fun setMembershipIntents(itemId: String, spaceId: String, intents: List<Intent>) {
         if (intents.isEmpty()) return
-        val user = uid ?: return
-        val q = spaceItems.whereEqualTo("userId", user)
-            .whereEqualTo("spaceId", spaceId).whereEqualTo("itemId", itemId).get().await()
+        val q = spaceItems.whereEqualTo("spaceId", spaceId).whereEqualTo("itemId", itemId).get().await()
         val payload = intents.map { mapOf("kind" to it.kind, "label" to it.label, "value" to it.value) }
         q.documents.firstOrNull()?.reference?.update("intents", payload)?.await()
     }

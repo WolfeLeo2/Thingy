@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -26,10 +25,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -39,9 +35,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Alarm
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NorthEast
@@ -49,8 +43,6 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ShoppingBag
-import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
-import androidx.compose.material3.carousel.rememberCarouselState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
@@ -60,18 +52,23 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedAssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
+import androidx.compose.material3.SegmentedListItem
 import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.SuggestionChipDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
+import androidx.compose.material3.carousel.rememberCarouselState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -81,16 +78,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -259,11 +256,15 @@ fun ItemDetailScreen(
                                     text = { Text("Add to space") },
                                     onClick = { menu = false; showSpaces = true },
                                 )
-                                DropdownMenuItem(
-                                    // Errors/destructive actions stay on the app's fixed default red.
-                                    text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                                    onClick = { menu = false; confirmDelete = true },
-                                )
+                                // Hard-delete is owner-only (rules block others); a non-owner viewing a
+                                // shared item removes it from the space via the space screen's card menu.
+                                if (activeItem?.userId == spaceRepository.currentUserId) {
+                                    DropdownMenuItem(
+                                        // Errors/destructive actions stay on the app's fixed default red.
+                                        text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                                        onClick = { menu = false; confirmDelete = true },
+                                    )
+                                }
                             }
                         }
                     },
@@ -326,8 +327,7 @@ fun ItemDetailScreen(
             confirmButton = {
                 TextButton(onClick = {
                     confirmDelete = false
-                    val target = activeId
-                    if (target != null) scope.launch { itemRepository.delete(target); onBack() }
+                    if (activeId != null) scope.launch { itemRepository.delete(activeId); onBack() }
                 }) { Text("Delete") }
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
@@ -413,7 +413,7 @@ private fun DetailPageContent(
             Modifier.sharedElement(
                 rememberSharedContentState(key = "item-image-$id"),
                 animatedVisibilityScope = animatedVisibilityScope,
-                boundsTransform = BoundsTransform { _, _ -> motionSpec },
+                boundsTransform = { _, _ -> motionSpec },
             )
         }
     } else Modifier
@@ -488,7 +488,16 @@ private fun DetailPageContent(
 
         item.tags.takeIf { it.isNotEmpty() }?.let { tags ->
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                tags.forEach { SuggestionChip(onClick = { }, label = { Text(it) }) }
+                tags.forEach { tag ->
+                    SuggestionChip(
+                        onClick = { },
+                        label = { Text(tag) },
+                        border = SuggestionChipDefaults.suggestionChipBorder(
+                            enabled = true,
+                            borderColor = MaterialTheme.colorScheme.outlineVariant,
+                        )
+                    )
+                }
             }
         }
 
@@ -512,12 +521,13 @@ private fun DetailPageContent(
 }
 
 /** "Find links": user-triggered SerpAPI shopping search + its result cards / loading / empty states. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun ProductLinks(item: Item, onFindLinks: () -> Unit) {
     val context = LocalContext.current
     val status = ProductsStatus.from(item.productsStatus)
     val products = item.products.orEmpty()
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         when {
             status == ProductsStatus.SEARCHING -> Row(
                 modifier = Modifier.align(Alignment.CenterHorizontally),
@@ -528,10 +538,28 @@ private fun ProductLinks(item: Item, onFindLinks: () -> Unit) {
                 Text("Finding shopping links…", style = MaterialTheme.typography.bodyMedium)
             }
             products.isNotEmpty() -> {
-                HorizontalDivider()
+                HorizontalDivider(Modifier.padding(bottom = 8.dp))
                 Text("Shopping links", style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.fillMaxWidth())
-                products.forEach { p -> ProductCard(p) { runIntent(context, "open_url", p.url) } }
+
+                val outerRadius = 24.dp
+                val innerRadius = 4.dp
+
+                products.forEachIndexed { index, p ->
+                    val shape = when {
+                        products.size == 1 -> MaterialTheme.shapes.large
+                        index == 0 -> RoundedCornerShape(
+                            topStart = outerRadius, topEnd = outerRadius,
+                            bottomStart = innerRadius, bottomEnd = innerRadius
+                        )
+                        index == products.lastIndex -> RoundedCornerShape(
+                            topStart = innerRadius, topEnd = innerRadius,
+                            bottomStart = outerRadius, bottomEnd = outerRadius
+                        )
+                        else -> RoundedCornerShape(innerRadius)
+                    }
+                    ProductCard(p, shape) { runIntent(context, "open_url", p.url) }
+                }
             }
             status == ProductsStatus.READY -> Text(
                 "No shopping links found.", style = MaterialTheme.typography.bodyMedium,
@@ -548,30 +576,45 @@ private fun ProductLinks(item: Item, onFindLinks: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun ProductCard(p: com.wolfeleo2.thingy.data.Product, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick, shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            p.thumbnailUrl?.let {
-                AsyncImage(model = it, contentDescription = p.title, contentScale = ContentScale.Crop,
-                    modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)))
+private fun ProductCard(p: com.wolfeleo2.thingy.data.Product, shape: androidx.compose.ui.graphics.Shape, onClick: () -> Unit) {
+    SegmentedListItem(
+        onClick = onClick,
+        shapes = ListItemDefaults.shapes(shape = shape),
+        verticalAlignment = Alignment.CenterVertically,
+        colors = ListItemDefaults.segmentedColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+        leadingContent = p.thumbnailUrl?.let {
+            {
+                AsyncImage(
+                    model = it,
+                    contentDescription = p.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                )
             }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(p.title, style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    p.price?.let { Text(it, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary) }
-                    p.merchant?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                }
+        },
+        supportingContent = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                p.price?.let { Text(it, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary) }
+                p.merchant?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
+        },
+        trailingContent = {
             Icon(Icons.Filled.NorthEast, null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(18.dp))
         }
+    ) {
+        Text(
+            p.title,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 

@@ -49,6 +49,13 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="image/*" />
             </intent-filter>
+            <!-- Space invite links/QR: thingy://join/<code> -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="thingy" android:host="join" />
+            </intent-filter>
         </activity>
 
         <!-- Hands collage share-cards to other apps as content:// URIs. -->

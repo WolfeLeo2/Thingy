@@ -28,6 +28,10 @@ enum class IntentKind(val wire: String) {
     CALL("call"), EMAIL("email"), MESSAGE("message"), ADD_EVENT("add_event");
     companion object { fun from(s: String?) = entries.firstOrNull { it.wire == s } }
 }
+enum class SpaceRole(val wire: String) {
+    OWNER("owner"), MEMBER("member");
+    companion object { fun from(s: String?) = entries.firstOrNull { it.wire == s } ?: MEMBER }
+}
 
 data class Intent(
     val kind: String = "",
@@ -69,6 +73,7 @@ data class Item(
     val productsStatus: String? = null,    // ProductsStatus.wire
     val searchText: String = "",
     val embedding: List<Double>? = null,  // on-device semantic-search vector (L2-normalized); null until indexed
+    val visibleTo: List<String> = emptyList(),  // denormalized union of memberIds of every shared space this item is in
     @ServerTimestamp val createdAt: Date? = null,
 )
 
@@ -82,12 +87,31 @@ fun Item.displayTitle(): String =
 
 data class Space(
     @DocumentId val id: String = "",
-    val userId: String = "",
+    val userId: String = "",               // owner
     val name: String = "",
     val description: String? = null,
     val dynamic: Boolean? = null,          // absent = false
     val shelfColor: Long? = null,          // precomputed ambient seed (ARGB) for the shelf-layout board, from shelfColorItemId
     val shelfColorItemId: String? = null,  // the item shelfColor was extracted from — recompute when the newest item changes
+    val memberIds: List<String> = emptyList(),   // denormalized uids with access — drives the `spaces()` query and security rules
+    val activeInviteCode: String? = null,        // current shareable join code (see SpaceInvite)
+    @ServerTimestamp val createdAt: Date? = null,
+)
+
+data class SpaceMember(
+    @DocumentId val id: String = "",       // "${spaceId}_${userId}"
+    val spaceId: String = "",
+    val userId: String = "",
+    val role: String = SpaceRole.MEMBER.wire,
+    val displayName: String? = null,       // denormalized from FirebaseAuth at join time
+    val photoUrl: String? = null,
+    @ServerTimestamp val joinedAt: Date? = null,
+)
+
+/** code -> spaceId lookup for join links/QR; doc id is the code itself. */
+data class SpaceInvite(
+    @DocumentId val code: String = "",
+    val spaceId: String = "",
     @ServerTimestamp val createdAt: Date? = null,
 )
 
@@ -104,3 +128,4 @@ data class SpaceItem(
 val Item.itemType get() = ItemType.from(type)
 val Item.itemStatus get() = ItemStatus.from(status)
 val SpaceItem.membershipStatus get() = SpaceItemStatus.from(status) ?: SpaceItemStatus.SAVED
+val SpaceMember.spaceRole get() = SpaceRole.from(role)

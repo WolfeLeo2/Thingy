@@ -22,6 +22,7 @@ class MainActivity : ComponentActivity() {
     private val sharedText = mutableStateOf<String?>(null)
     private val sharedImages = mutableStateOf<List<Uri>>(emptyList())
     private val openItemId = mutableStateOf<String?>(null)
+    private val joinCode = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,6 +47,8 @@ class MainActivity : ComponentActivity() {
                     onImagesConsumed = { sharedImages.value = emptyList() },
                     openItemId = openItemId.value,
                     onOpenItemConsumed = { openItemId.value = null },
+                    joinCode = joinCode.value,
+                    onJoinCodeConsumed = { joinCode.value = null },
                 )
             }
         }
@@ -61,6 +64,10 @@ class MainActivity : ComponentActivity() {
         if (intent == null) return
         intent.getStringExtra(ReminderManager.EXTRA_OPEN_ITEM_ID)?.let { id ->
             openItemId.value = id
+        }
+        val data = intent.data
+        if (intent.action == Intent.ACTION_VIEW && data?.scheme == "thingy" && data.host == "join") {
+            data.lastPathSegment?.let { joinCode.value = it }
         }
         val type = intent.type.orEmpty()
         // An image share often ALSO carries the page URL as EXTRA_TEXT — treat it as an image

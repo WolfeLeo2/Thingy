@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -23,21 +24,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -62,7 +58,6 @@ import com.mapbox.maps.extension.compose.annotation.ViewAnnotation
 import com.mapbox.maps.viewannotation.geometry
 import com.mapbox.maps.viewannotation.viewAnnotationOptions
 import com.wolfeleo2.thingy.data.Item
-import com.wolfeleo2.thingy.data.ItemRepository
 import com.wolfeleo2.thingy.data.ItemType
 import kotlin.math.log2
 import kotlin.math.max
@@ -71,14 +66,14 @@ import kotlin.math.roundToInt
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun MapScreen(
-    itemRepository: ItemRepository,
+    library: LibraryViewModel,
     onOpenItem: (List<String>, Int, Boolean) -> Unit,
     onBack: () -> Unit
 ) {
-    val items by itemRepository.items().collectAsStateWithLifecycle(emptyList())
-    
+    val items by library.items.collectAsStateWithLifecycle(null)
+
     val located = remember(items) {
-        items.filter { it.latitude != null && it.longitude != null }
+        items.orEmpty().filter { it.latitude != null && it.longitude != null }
     }
     
     val clusters = remember(located) {
@@ -146,7 +141,7 @@ fun MapScreen(
                                     .background(MaterialTheme.colorScheme.primaryContainer)
                                     .clickable {
                                         if (cluster.size == 1) {
-                                            val allIds = items.map { it.id }
+                                            val allIds = items.orEmpty().map { it.id }
                                             val index = allIds.indexOf(item.id).takeIf { it >= 0 } ?: 0
                                             onOpenItem(allIds, index, true)
                                         } else {
@@ -262,7 +257,7 @@ fun MapScreen(
                             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                             .clickable {
                                 selectedCluster = null
-                                val allIds = items.map { it.id }
+                                val allIds = items.orEmpty().map { it.id }
                                 val index = allIds.indexOf(cItem.id).takeIf { it >= 0 } ?: 0
                                 onOpenItem(allIds, index, true)
                             }

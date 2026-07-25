@@ -20,7 +20,6 @@ import androidx.compose.material3.ButtonShapes
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.toPath
@@ -42,11 +41,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.graphics.shapes.Morph
+import androidx.graphics.shapes.RoundedPolygon
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wolfeleo2.thingy.data.Classifier
 import com.wolfeleo2.thingy.data.SpaceRepository
-import androidx.graphics.shapes.Morph
-import androidx.graphics.shapes.RoundedPolygon
 import kotlinx.coroutines.launch
 
 /** A Compose [Shape] from a Material [RoundedPolygon] (static — no morph). */
@@ -108,6 +107,55 @@ fun ThingyEmptyState(
             Button(onClick = onAction, shapes = expressiveButtonShapes()) { Text(actionLabel) }
         }
     }
+}
+
+/**
+ * Multi-select counterpart to [ManageSpacesDialog]: pick one shelf, everything selected lands in it.
+ * No per-space checkmarks — with N items a shelf is "some in, some out", which a toggle can't say.
+ */
+@Composable
+fun AddManyToSpaceDialog(
+    itemIds: Collection<String>,
+    spaceRepository: SpaceRepository,
+    classifier: Classifier,
+    onDone: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val spaces by remember { spaceRepository.spaces() }.collectAsStateWithLifecycle(emptyList())
+    val count = itemIds.size
+
+    AlertDialog(
+        onDismissRequest = onDone,
+        title = { Text("Add $count ${if (count == 1) "thingy" else "thingies"} to…") },
+        text = {
+            if (spaces.isEmpty()) {
+                Text("No spaces yet — create one first.")
+            } else {
+                Column {
+                    spaces.forEach { space ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable {
+                                scope.launch {
+                                    spaceRepository.addItemsToSpace(itemIds, space.id)
+                                    itemIds.forEach { classifier.steerItemForSpace(it, space.id) }
+                                }
+                                onDone()
+                            }.padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(space.name, modifier = Modifier.weight(1f))
+                            Icon(
+                                Icons.Filled.Add,
+                                contentDescription = "Add",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDone) { Text("Cancel") } },
+    )
 }
 
 /** Shared Spaces [AlertDialog] to allow it to be shown across pages */

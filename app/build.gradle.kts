@@ -41,6 +41,17 @@ android {
             "String", "SERP_API_KEY",
             "\"${localProperties.getProperty("SERP_API_KEY") ?: System.getenv("SERP_API_KEY") ?: ""}\"",
         )
+        // Cloudinary signed "destroy" API needs api_key + api_secret client-side to clean up
+        // orphaned uploads on item delete. Baked into the APK (hobby-scale; same trade-off as
+        // the unsigned upload preset and SERP_API_KEY above).
+        buildConfigField(
+            "String", "CLOUDINARY_API_KEY",
+            "\"${localProperties.getProperty("CLOUDINARY_API_KEY") ?: System.getenv("CLOUDINARY_API_KEY") ?: ""}\"",
+        )
+        buildConfigField(
+            "String", "CLOUDINARY_API_SECRET",
+            "\"${localProperties.getProperty("CLOUDINARY_API_SECRET") ?: System.getenv("CLOUDINARY_API_SECRET") ?: ""}\"",
+        )
     }
 
     if (ciKeystorePath != null) {
@@ -118,6 +129,7 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.commonmark)
     implementation(libs.material.kolor)
+    implementation(libs.zxing.core)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.jsoup)
     implementation(libs.readability4j)

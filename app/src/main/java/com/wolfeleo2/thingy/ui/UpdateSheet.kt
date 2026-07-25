@@ -1,11 +1,13 @@
 package com.wolfeleo2.thingy.ui
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -13,11 +15,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.SystemUpdate
-import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
@@ -25,10 +30,10 @@ import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SplitButtonDefaults
+import androidx.compose.material3.SplitButtonLayout
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -41,16 +46,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import java.io.File
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -64,6 +65,8 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.wolfeleo2.thingy.data.AppUpdate
 import com.wolfeleo2.thingy.data.UpdateChecker
 import kotlinx.coroutines.Job
@@ -73,8 +76,8 @@ import org.commonmark.node.BulletList
 import org.commonmark.node.Code
 import org.commonmark.node.Emphasis
 import org.commonmark.node.FencedCodeBlock
-import org.commonmark.node.Heading
 import org.commonmark.node.HardLineBreak
+import org.commonmark.node.Heading
 import org.commonmark.node.IndentedCodeBlock
 import org.commonmark.node.Link
 import org.commonmark.node.ListItem
@@ -83,8 +86,9 @@ import org.commonmark.node.OrderedList
 import org.commonmark.node.Paragraph
 import org.commonmark.node.SoftLineBreak
 import org.commonmark.node.StrongEmphasis
-import org.commonmark.node.Text as CmText
 import org.commonmark.parser.Parser
+import java.io.File
+import org.commonmark.node.Text as CmText
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -223,48 +227,68 @@ fun UpdateSheet(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TextButton(
-                    onClick = {
-                        if (downloading) {
-                            downloadJob?.cancel()
-                            downloading = false
-                        } else {
-                            onDismiss()
-                        }
-                    }
-                ) {
-                    Text(if (downloading) "Cancel" else "Later")
-                }
-                Spacer(Modifier.width(8.dp))
-                Button(
-                    enabled = !downloading,
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        downloading = true
-                        error = null
-                        dlBytes = 0L
-                        dlTotal = 0L
-                        downloadJob = scope.launch {
-                            runCatching {
-                                val file = checker.download(update) { done, total -> dlBytes = done; dlTotal = total }
-                                if (checker.install(file)) {
-                                    onDismiss()
-                                } else {
-                                    // Redirected to the "allow unknown sources" setting — resume
-                                    // the install from the already-downloaded file on ON_RESUME.
-                                    pendingInstallFile = file
-                                }
-                            }.onFailure {
-                                error = "Download failed: ${it.message}"
+                var laterMenuExpanded by remember { mutableStateOf(false) }
+                Box {
+                    SplitButtonLayout(
+                        leadingButton = {
+                            SplitButtonDefaults.LeadingButton(
+                                enabled = !downloading,
+                                onClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    downloading = true
+                                    error = null
+                                    dlBytes = 0L
+                                    dlTotal = 0L
+                                    downloadJob = scope.launch {
+                                        runCatching {
+                                            val file = checker.download(update) { done, total -> dlBytes = done; dlTotal = total }
+                                            if (checker.install(file)) {
+                                                onDismiss()
+                                            } else {
+                                                // Redirected to the "allow unknown sources" setting — resume
+                                                // the install from the already-downloaded file on ON_RESUME.
+                                                pendingInstallFile = file
+                                            }
+                                        }.onFailure {
+                                            error = "Download failed: ${it.message}"
+                                        }
+                                        downloading = false
+                                    }
+                                },
+                            ) {
+                                Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (downloading) "Downloading…" else "Install Update")
                             }
-                            downloading = false
-                        }
-                    },
-                    shapes = expressiveButtonShapes()
-                ) {
-                    Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(if (downloading) "Downloading…" else "Install Update")
+                        },
+                        trailingButton = {
+                            SplitButtonDefaults.TrailingButton(
+                                checked = laterMenuExpanded,
+                                onCheckedChange = { laterMenuExpanded = it },
+                            ) {
+                                val rotation by animateFloatAsState(if (laterMenuExpanded) 180f else 0f)
+                                Icon(
+                                    Icons.Filled.KeyboardArrowDown,
+                                    contentDescription = "More options",
+                                    modifier = Modifier.size(SplitButtonDefaults.TrailingIconSize).graphicsLayer { rotationZ = rotation }
+                                )
+                            }
+                        },
+                    )
+                    DropdownMenu(expanded = laterMenuExpanded, onDismissRequest = { laterMenuExpanded = false }) {
+                        DropdownMenuItem(
+                            text = { Text(if (downloading) "Cancel" else "Later") },
+                            onClick = {
+                                laterMenuExpanded = false
+                                if (downloading) {
+                                    downloadJob?.cancel()
+                                    downloading = false
+                                } else {
+                                    onDismiss()
+                                }
+                            },
+                        )
+                    }
                 }
             }
         }

@@ -1,11 +1,16 @@
 package com.wolfeleo2.thingy.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -14,43 +19,48 @@ import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Style
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FloatingToolbarDefaults
 import androidx.compose.material3.FloatingToolbarExitDirection
-import androidx.compose.material3.FloatingToolbarScrollBehavior
 import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.util.UnstableApi
 import com.wolfeleo2.thingy.data.Embedder
 import com.wolfeleo2.thingy.data.ImageIngestor
@@ -77,6 +87,7 @@ private enum class Tab(val label: String, val icon: ImageVector) {
 @Composable
 fun MainShell(
     userId: String?,
+    library: LibraryViewModel,
     itemRepository: ItemRepository,
     spaceRepository: SpaceRepository,
     classifier: com.wolfeleo2.thingy.data.Classifier,
@@ -99,17 +110,23 @@ fun MainShell(
     var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
     var showAdd by remember { mutableStateOf(false) }
     var sharingSpace by remember { mutableStateOf<com.wolfeleo2.thingy.data.Space?>(null) }
+    var invitingSpaceId by remember { mutableStateOf<String?>(null) }
     var addingToSpaceId by remember { mutableStateOf<String?>(null) }
+    // Home multi-select (long-press to start). Lives here so the floating toolbar can morph into the
+    // contextual action bar — it's drawn above the tab content, so a bar inside HomeFeed would be buried.
+    val selectedIds = remember { mutableStateSetOf<String>() }
+    var confirmBulkDelete by remember { mutableStateOf(false) }
+    var addingSelectionToSpace by remember { mutableStateOf(false) }
     val stateHolder = rememberSaveableStateHolder()
-    // Keyed by uid so a sign-out/sign-in swap gets a fresh ViewModel instead of briefly showing
-    // the previous account's stale spaceSuggestions/items before the new Firestore snapshot lands.
-    val library: LibraryViewModel = key(userId) { viewModel { LibraryViewModel() } }
     // Collected here (not inside the Spaces tab branch) so the DataStore read warms up in the
     // background from first composition — avoids a GRID-then-SHELF flash on first tab switch.
     val spacesLayout by settings.spacesLayout.collectAsStateWithLifecycle(SpacesLayout.GRID)
     val scrollBehavior = FloatingToolbarDefaults.exitAlwaysScrollBehavior(
         exitDirection = FloatingToolbarExitDirection.Bottom, // toolbar exits downward off-screen
     )
+    // A selection is Home's alone — switching tabs drops it rather than leaving a stale count.
+    LaunchedEffect(tab) { if (tab != Tab.HOME) selectedIds.clear() }
+    BackHandler(enabled = selectedIds.isNotEmpty()) { selectedIds.clear() }
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior),
@@ -127,12 +144,18 @@ fun MainShell(
             // Each tab keeps its own UI state (scroll, query) across tab switches.
             stateHolder.SaveableStateProvider(tab) {
                 when (tab) {
-                    Tab.HOME -> HomeFeed(library, itemRepository, spaceRepository, classifier, settings, sharedTransitionScope, animatedVisibilityScope, onOpenItem, onAddToSpace = { addingToSpaceId = it })
+                    Tab.HOME -> HomeFeed(
+                        library, itemRepository, spaceRepository, classifier, settings,
+                        sharedTransitionScope, animatedVisibilityScope, onOpenItem,
+                        onAddToSpace = { addingToSpaceId = it },
+                        selectedIds = selectedIds,
+                        onToggleSelect = { id -> if (!selectedIds.add(id)) selectedIds.remove(id) },
+                    )
                     Tab.SPACES -> {
                         if (spacesLayout == SpacesLayout.SHELF) {
-                            ShelfSpacesScreen(library, spaceRepository, onOpenSpace, onOpenSpaceSettings, onShare = { sharingSpace = it })
+                            ShelfSpacesScreen(library, spaceRepository, itemRepository, onOpenSpace, onOpenSpaceSettings, onShare = { sharingSpace = it }, onInvite = { invitingSpaceId = it.id })
                         } else {
-                            SpacesGrid(library, spaceRepository, onOpenSpace, onOpenSpaceSettings, onShare = { sharingSpace = it })
+                            SpacesGrid(library, spaceRepository, itemRepository, onOpenSpace, onOpenSpaceSettings, onShare = { sharingSpace = it }, onInvite = { invitingSpaceId = it.id })
                         }
                     }
                     Tab.TIDY -> TidyScreen(ingestor, Modifier.padding(bottom = 88.dp))
@@ -140,18 +163,50 @@ fun MainShell(
                 }
             }
 
-            // Expressive floating toolbar with a docked FAB .
-            HorizontalFloatingToolbar(
-                expanded = true,
-                scrollBehavior = scrollBehavior,
-                floatingActionButton = {
-                    FloatingToolbarDefaults.StandardFloatingActionButton(
-                        onClick = { if (tab == Tab.SPACES) onOpenSpaceSettings(null) else showAdd = true },
-                    ) { Icon(Icons.Filled.Add, contentDescription = if (tab == Tab.SPACES) "New space" else "Add") }
-                },
+            // Expressive floating toolbar with a docked FAB — swaps to a vibrant contextual bar
+            // (count + the two bulk actions) while a Home selection is live.
+            AnimatedContent(
+                targetState = selectedIds.isNotEmpty(),
+                transitionSpec = { fadeIn() + scaleIn(initialScale = 0.85f) togetherWith fadeOut() },
+                label = "toolbar",
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
-            ) {
-                Tab.entries.forEach { t -> NavIcon(t, selected = tab == t) { tab = t } }
+            ) { selecting ->
+                if (selecting) {
+                    HorizontalFloatingToolbar(
+                        expanded = true,
+                        colors = FloatingToolbarDefaults.vibrantFloatingToolbarColors(),
+                    ) {
+                        IconButton(onClick = { selectedIds.clear() }) {
+                            BadgedBox(
+                                badge = {
+                                    Badge {
+                                        Text("${selectedIds.size}")
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Filled.Close, contentDescription = "Clear selection")
+                            }
+                        }
+                        IconButton(onClick = { addingSelectionToSpace = true }) {
+                            Icon(Icons.Filled.Dashboard, contentDescription = "Add to shelf")
+                        }
+                        IconButton(onClick = { confirmBulkDelete = true }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete")
+                        }
+                    }
+                } else {
+                    HorizontalFloatingToolbar(
+                        expanded = true,
+                        scrollBehavior = scrollBehavior,
+                        floatingActionButton = {
+                            FloatingToolbarDefaults.StandardFloatingActionButton(
+                                onClick = { if (tab == Tab.SPACES) onOpenSpaceSettings(null) else showAdd = true },
+                            ) { Icon(Icons.Filled.Add, contentDescription = if (tab == Tab.SPACES) "New space" else "Add") }
+                        },
+                    ) {
+                        Tab.entries.forEach { t -> NavIcon(t, selected = tab == t) { tab = t } }
+                    }
+                }
             }
         }
 
@@ -179,11 +234,11 @@ fun MainShell(
         }
 
         sharingSpace?.let { space ->
-            val members = library.memberships.collectAsStateWithLifecycle().value
-                .filter { it.spaceId == space.id && it.status != SpaceItemStatus.DISMISSED.wire }
-            val items = library.items.collectAsStateWithLifecycle().value.orEmpty().associateBy { it.id }
-            val spaceItems = members.mapNotNull { items[it.itemId] }
-            
+            val members by remember(space.id) { spaceRepository.membershipsForSpace(space.id) }.collectAsStateWithLifecycle(emptyList())
+            val live = members.filter { it.status != SpaceItemStatus.DISMISSED.wire }
+            val itemIds = remember(live) { live.map { it.itemId } }
+            val spaceItems by remember(itemIds) { itemRepository.itemsByIds(itemIds) }.collectAsStateWithLifecycle(emptyList())
+
             CollageShareSheet(
                 spaceName = space.name,
                 items = spaceItems,
@@ -197,6 +252,37 @@ fun MainShell(
                 spaceRepository = spaceRepository,
                 classifier = classifier,
                 onDismiss = { addingToSpaceId = null }
+            )
+        }
+
+        invitingSpaceId?.let { id ->
+            InviteSheet(spaceId = id, spaceRepository = spaceRepository, onDismiss = { invitingSpaceId = null })
+        }
+
+        if (addingSelectionToSpace) {
+            AddManyToSpaceDialog(
+                itemIds = selectedIds.toList(),
+                spaceRepository = spaceRepository,
+                classifier = classifier,
+                onDone = { addingSelectionToSpace = false; selectedIds.clear() },
+            )
+        }
+
+        if (confirmBulkDelete) {
+            val count = selectedIds.size
+            AlertDialog(
+                onDismissRequest = { confirmBulkDelete = false },
+                title = { Text("Delete $count ${if (count == 1) "thingy" else "thingies"}?") },
+                text = { Text("They're removed from Home and every space. This can't be undone.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val ids = selectedIds.toList()
+                        confirmBulkDelete = false
+                        selectedIds.clear()
+                        scope.launch { itemRepository.deleteAll(ids) }
+                    }) { Text("Delete") }
+                },
+                dismissButton = { TextButton(onClick = { confirmBulkDelete = false }) { Text("Cancel") } },
             )
         }
     }
@@ -218,14 +304,15 @@ private fun NavIcon(tab: Tab, selected: Boolean, onClick: () -> Unit) {
 private fun SpacesGrid(
     library: LibraryViewModel,
     spaceRepository: SpaceRepository,
+    itemRepository: ItemRepository,
     onOpenSpace: (String) -> Unit,
     onEdit: (String?) -> Unit,
     onShare: (com.wolfeleo2.thingy.data.Space) -> Unit,
+    onInvite: (com.wolfeleo2.thingy.data.Space) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val myUid = spaceRepository.currentUserId
     val spaces by library.spaces.collectAsStateWithLifecycle()
-    val memberships by library.memberships.collectAsStateWithLifecycle()
-    val items by library.items.collectAsStateWithLifecycle()
 
     val spaceList = spaces ?: return // loading
     if (spaceList.isEmpty()) {
@@ -239,18 +326,25 @@ private fun SpacesGrid(
         )
         return
     }
-    val itemById = items.orEmpty().associateBy { it.id }
     Grid {
         items(spaceList, key = { it.id }) { space ->
-            val members = memberships.filter { it.spaceId == space.id && it.status != SpaceItemStatus.DISMISSED.wire }
-            val preview = members.mapNotNull { itemById[it.itemId] }.maxByOrNull { it.createdAt?.time ?: 0L }
-            val hasSuggestion = members.any { it.status == SpaceItemStatus.SUGGESTED.wire }
+            // spaceId-scoped (not the owner-only library flows) so a shared space's cover shows
+            // items added by any member, not just the ones this user personally saved.
+            val members by remember(space.id) { spaceRepository.membershipsForSpace(space.id) }.collectAsStateWithLifecycle(emptyList())
+            val live = members.filter { it.status != SpaceItemStatus.DISMISSED.wire }
+            val itemIds = remember(live) { live.map { it.itemId } }
+            val spaceItems by remember(itemIds) { itemRepository.itemsByIds(itemIds) }.collectAsStateWithLifecycle(emptyList())
+            val preview = spaceItems.maxByOrNull { it.createdAt?.time ?: 0L }
+            val hasSuggestion = live.any { it.status == SpaceItemStatus.SUGGESTED.wire }
             CoverStack(
                 name = space.name, preview = preview, hasSuggestion = hasSuggestion,
                 onClick = { onOpenSpace(space.id) },
                 onEdit = { onEdit(space.id) },
                 onShare = { onShare(space) },
+                onInvite = { onInvite(space) },
                 onDelete = { scope.launch { spaceRepository.deleteSpace(space.id) } },
+                isOwner = space.userId == myUid,
+                onLeave = { myUid?.let { u -> scope.launch { spaceRepository.removeMember(space.id, u) } } },
                 modifier = Modifier.animateItem(),
             )
         }

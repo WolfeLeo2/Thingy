@@ -8,7 +8,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -70,9 +69,9 @@ import com.wolfeleo2.thingy.data.TidyMedia
 import com.wolfeleo2.thingy.data.TidyPhoto
 import com.wolfeleo2.thingy.ui.ThingyEmptyState
 import com.wolfeleo2.thingy.ui.expressiveButtonShapes
-import kotlin.math.abs
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 private const val BATCH = 30
 private val photosPermission =
@@ -197,8 +196,14 @@ private fun Deck(ingestor: ImageIngestor, modifier: Modifier, limited: Boolean, 
                     }
                 }
             }
-            BadgedBox(badge = { if (pendingDelete.isNotEmpty()) Badge { Text("${pendingDelete.size}") } }) {
-                IconButton(onClick = { commitDeletes() }, enabled = pendingDelete.isNotEmpty()) {
+            IconButton(onClick = { commitDeletes() }, enabled = pendingDelete.isNotEmpty()) {
+            BadgedBox(
+                badge = {
+                    if (pendingDelete.isNotEmpty())
+                        Badge { Text("${pendingDelete.size}")
+                        }
+                })
+            {
                     Icon(Icons.Filled.Delete, "Delete now")
                 }
             }

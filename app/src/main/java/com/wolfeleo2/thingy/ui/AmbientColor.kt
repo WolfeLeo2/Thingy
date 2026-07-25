@@ -33,4 +33,4 @@ suspend fun extractPaletteSeed(context: Context, model: Any): Int? = runCatching
 }.getOrNull()
 
 fun seedColorScheme(seed: Int, isDark: Boolean) =
-    dynamicColorScheme(primary = Color(seed), isDark = isDark, isAmoled = false, style = PaletteStyle.Expressive)
+    dynamicColorScheme(seedColor = Color(seed), isDark = isDark, isAmoled = false, style = PaletteStyle.Vibrant)

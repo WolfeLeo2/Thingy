@@ -3,43 +3,33 @@ package com.wolfeleo2.thingy.ui
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
-import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
-import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
 import androidx.compose.foundation.lazy.staggeredgrid.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ButtonGroup
+import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -48,10 +38,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -67,7 +54,7 @@ import com.wolfeleo2.thingy.ui.add.AddSheet
 import com.wolfeleo2.thingy.ui.share.CollageShareSheet
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable
 fun SpaceDetailScreen(
@@ -87,11 +74,15 @@ fun SpaceDetailScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val space by remember(spaceId) { spaceRepository.space(spaceId) }.collectAsStateWithLifecycle(null)
+    val members by remember(spaceId) { spaceRepository.membersForSpace(spaceId) }.collectAsStateWithLifecycle(emptyList())
     val memberships by remember(spaceId) { spaceRepository.membershipsForSpace(spaceId) }.collectAsStateWithLifecycle(emptyList())
-    val items by remember { itemRepository.items() }.collectAsStateWithLifecycle(emptyList())
+    val membershipItemIds = memberships.map { it.itemId }.distinct()
+    val items by remember(membershipItemIds) { itemRepository.itemsByIds(membershipItemIds) }.collectAsStateWithLifecycle(emptyList())
     var showAdd by remember { mutableStateOf(false) }
     var showCollage by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
+    var showMembers by remember { mutableStateOf(false) }
+    var showInvite by remember { mutableStateOf(false) }
     var addingToSpaceId by remember { mutableStateOf<String?>(null) }
     var burstTrigger by remember { mutableIntStateOf(0) }
 
@@ -109,12 +100,78 @@ fun SpaceDetailScreen(
                 title = { Text(space?.name ?: "Space", fontWeight = FontWeight.ExtraBold) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
                 actions = {
+                    MemberAvatarStack(members = members, onClick = { showMembers = true })
+                    if (suggested.isNotEmpty()) {
+                        ButtonGroup(
+                            overflowIndicator = { menuState -> ButtonGroupDefaults.OverflowIndicator(menuState = menuState) },
+                            horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)
+                        ) {
+                            customItem(
+                                buttonGroupContent = {
+                                    val interactionSource = remember { MutableInteractionSource() }
+                                    FilledTonalIconButton(
+                                        onClick = {
+                                            burstTrigger++
+                                            scope.launch {
+                                                spaceRepository.acceptAll(spaceId).forEach { classifier.steerItemForSpace(it, spaceId) }
+                                            }
+                                        },
+                                        interactionSource = interactionSource,
+                                        shape = ButtonGroupDefaults.connectedLeadingButtonShape,
+                                        modifier = Modifier.animateWidth(interactionSource)
+                                    ) {
+                                        Icon(Icons.Filled.Check, contentDescription = "Accept all")
+                                    }
+                                },
+                                menuContent = { menuState ->
+                                    DropdownMenuItem(
+                                        text = { Text("Accept all") },
+                                        leadingIcon = { Icon(Icons.Filled.Check, contentDescription = null) },
+                                        onClick = {
+                                            burstTrigger++
+                                            scope.launch {
+                                                spaceRepository.acceptAll(spaceId).forEach { classifier.steerItemForSpace(it, spaceId) }
+                                            }
+                                            menuState.dismiss()
+                                        }
+                                    )
+                                }
+                            )
+                            customItem(
+                                buttonGroupContent = {
+                                    val interactionSource = remember { MutableInteractionSource() }
+                                    FilledTonalIconButton(
+                                        onClick = { scope.launch { spaceRepository.dismissAll(spaceId) } },
+                                        interactionSource = interactionSource,
+                                        shape = ButtonGroupDefaults.connectedTrailingButtonShape,
+                                        modifier = Modifier.animateWidth(interactionSource)
+                                    ) {
+                                        Icon(Icons.Filled.Close, contentDescription = "Dismiss all")
+                                    }
+                                },
+                                menuContent = { menuState ->
+                                    DropdownMenuItem(
+                                        text = { Text("Dismiss all") },
+                                        leadingIcon = { Icon(Icons.Filled.Close, contentDescription = null) },
+                                        onClick = {
+                                            scope.launch { spaceRepository.dismissAll(spaceId) }
+                                            menuState.dismiss()
+                                        }
+                                    )
+                                }
+                            )
+                        }
+                    }
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "More") }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                             DropdownMenuItem(
                                 text = { Text("Edit shelf") },
                                 onClick = { menu = false; onEdit() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Invite") },
+                                onClick = { menu = false; showInvite = true },
                             )
                             DropdownMenuItem(
                                 text = { Text("Share collage") },
@@ -138,23 +195,6 @@ fun SpaceDetailScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxSize().padding(padding),
             ) {
-                if (suggested.isNotEmpty()) {
-                    item(span = StaggeredGridItemSpan.FullLine) {
-                        ReviewHeader(
-                            count = suggested.size,
-                            onAcceptAll = {
-                                burstTrigger++
-                                scope.launch {
-                                    spaceRepository.acceptAll(spaceId).forEach { classifier.steerItemForSpace(it, spaceId) }
-                                }
-                            },
-                            onDismissAll = {
-                                scope.launch { spaceRepository.dismissAll(spaceId) }
-                            }
-                        )
-                    }
-                }
-
                 items(ordered, key = { it.first.id }) { (membership, item) ->
                     val isSuggested = membership.status == SpaceItemStatus.SUGGESTED.wire
                     val index = ids.indexOf(item.id)
@@ -181,7 +221,11 @@ fun SpaceDetailScreen(
                         onRemove = if (!isSuggested) {
                             { scope.launch { spaceRepository.removeMembership(membership.id) } }
                         } else null,
-                        onDelete = { scope.launch { itemRepository.delete(item.id) } },
+                        // Hard-delete (asset + all memberships) is owner-only — the rules block a
+                        // non-owner's items delete, so others get "Remove from space" instead.
+                        onDelete = if (item.userId == spaceRepository.currentUserId) {
+                            { scope.launch { itemRepository.delete(item.id) } }
+                        } else null,
                     )
                 }
             }
@@ -225,78 +269,21 @@ fun SpaceDetailScreen(
             }
 
             ShapeBurstEffect(trigger = burstTrigger)
-        }
-    }
-}
 
-@Composable
-private fun ReviewHeader(
-    count: Int,
-    onAcceptAll: () -> Unit,
-    onDismissAll: () -> Unit,
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = RoundedCornerShape(24.dp),
-        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-    ) {
-        Column(Modifier.fillMaxWidth().padding(16.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Box(
-                    Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Filled.AutoAwesome,
-                        null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "$count new suggestions",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        "Review them for this shelf",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+            if (showMembers) {
+                MembersSheet(
+                    spaceId = spaceId,
+                    spaceRepository = spaceRepository,
+                    onInvite = { showMembers = false; showInvite = true },
+                    onDismiss = { showMembers = false },
+                )
             }
-
-            Spacer(Modifier.height(16.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = onAcceptAll,
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(0.dp),
-                    shapes = expressiveButtonShapes()
-                ) {
-                    Text("Accept all")
-                }
-                OutlinedButton(
-                    onClick = onDismissAll,
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(0.dp),
-                    shapes = expressiveButtonShapes(),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
-                ) {
-                    Text("Dismiss all")
-                }
+            if (showInvite) {
+                InviteSheet(
+                    spaceId = spaceId,
+                    spaceRepository = spaceRepository,
+                    onDismiss = { showInvite = false },
+                )
             }
         }
     }

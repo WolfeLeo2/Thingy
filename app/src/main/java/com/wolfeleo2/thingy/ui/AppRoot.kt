@@ -1,16 +1,17 @@
 package com.wolfeleo2.thingy.ui
 
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -19,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
@@ -34,11 +36,11 @@ import com.wolfeleo2.thingy.data.OfflineImageSyncer
 import com.wolfeleo2.thingy.data.SettingsRepository
 import com.wolfeleo2.thingy.data.SpaceRepository
 import com.wolfeleo2.thingy.data.VideoIngestor
-import com.wolfeleo2.thingy.nav.Home
-import com.wolfeleo2.thingy.nav.Map
 import com.wolfeleo2.thingy.nav.Camera
+import com.wolfeleo2.thingy.nav.Home
 import com.wolfeleo2.thingy.nav.ItemDetail
 import com.wolfeleo2.thingy.nav.Login
+import com.wolfeleo2.thingy.nav.Map
 import com.wolfeleo2.thingy.nav.NewSpace
 import com.wolfeleo2.thingy.nav.Onboarding
 import com.wolfeleo2.thingy.nav.Settings
@@ -66,6 +68,8 @@ fun AppRoot(
     onImagesConsumed: () -> Unit = {},
     openItemId: String? = null,
     onOpenItemConsumed: () -> Unit = {},
+    joinCode: String? = null,
+    onJoinCodeConsumed: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val appContext = LocalContext.current.applicationContext
@@ -79,6 +83,12 @@ fun AppRoot(
     val offlineSyncer = remember { OfflineImageSyncer(appContext) }
 
     val user by auth.authState.collectAsStateWithLifecycle(auth.currentUser)
+
+    // Hoisted here (not inside MainShell) so MapScreen — a sibling nav destination — shares the
+    // same warm StateFlows instead of opening a second, independent Firestore listener.
+    val library: LibraryViewModel = key(user?.uid) {
+        viewModel { LibraryViewModel(itemRepository, spaceRepository) }
+    }
     val onboardedFlow = remember(settings) { settings.onboardingComplete.map<Boolean, Boolean?> { it } }
     val onboarded by onboardedFlow.collectAsStateWithLifecycle(null)
     val smartSearch by settings.smartSearchEnabled.collectAsStateWithLifecycle(false)
@@ -94,6 +104,8 @@ fun AppRoot(
         if (user != null) {
             // Migrate legacy items (local / Firebase Storage) to Cloudinary in the background.
             launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { cloudinaryMigration.run() } }
+            // Backfill spaces created before sharing existed with memberIds.
+            launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { spaceRepository.migrateLegacySpacesToMemberIds() } }
             // Download any missing images to filesDir for true offline access.
             launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { offlineSyncer.run() } }
             runCatching { classifier.run() } // collects the feed; cancels on sign-out
@@ -134,6 +146,17 @@ fun AppRoot(
         if (targetId != null && user != null && onboarded == true) {
             backStack.add(ItemDetail(itemIds = listOf(targetId), startIndex = 0, disableSharedTransition = true))
             onOpenItemConsumed()
+        }
+    }
+
+    // Deep link from a space invite (link/QR): join, then open the space.
+    LaunchedEffect(joinCode, user?.uid, onboarded) {
+        val code = joinCode
+        if (code != null && user != null && onboarded == true) {
+            runCatching { spaceRepository.joinSpaceByCode(code) }.getOrNull()?.let { spaceId ->
+                backStack.add(SpaceDetail(spaceId))
+            }
+            onJoinCodeConsumed()
         }
     }
 
@@ -182,6 +205,7 @@ fun AppRoot(
                 entry<Home> {
                     MainShell(
                         userId = user?.uid,
+                        library = library,
                         itemRepository = itemRepository,
                         spaceRepository = spaceRepository,
                         classifier = classifier,
@@ -213,7 +237,7 @@ fun AppRoot(
                 }
                 entry<Map> {
                     MapScreen(
-                        itemRepository = itemRepository,
+                        library = library,
                         onOpenItem = { ids, index, disableShared -> backStack.add(ItemDetail(ids, index, disableSharedTransition = disableShared)) },
                         onBack = onBack,
                     )

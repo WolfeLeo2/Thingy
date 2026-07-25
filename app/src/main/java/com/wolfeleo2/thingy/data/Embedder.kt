@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.google.android.gms.tflite.java.TfLite
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
@@ -107,7 +108,10 @@ class Embedder(private val context: Context) {
      * Download the model once. [onProgress] reports (downloadedBytes, totalBytes) as it streams
      * (totalBytes is 0 if the server didn't send a length). Returns true if present afterwards.
      */
-    suspend fun download(onProgress: (Long, Long) -> Unit = { _, _ -> }): Boolean = withContext(Dispatchers.IO) {
+    // NonCancellable: the caller's coroutine scope (e.g. a Settings screen) is often gone by the
+    // time this finishes — navigating away must not silently truncate the download and leave the
+    // "smart search on but never ready" toggle stuck on "Preparing…" forever.
+    suspend fun download(onProgress: (Long, Long) -> Unit = { _, _ -> }): Boolean = withContext(Dispatchers.IO + NonCancellable) {
         if (isReady()) return@withContext true
         runCatching {
             val conn = (URL(MODEL_URL).openConnection() as HttpURLConnection).apply {
