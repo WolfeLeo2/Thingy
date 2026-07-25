@@ -231,16 +231,18 @@ class SpaceRepository(
             val itemIds = spaceItems.whereEqualTo("spaceId", space.id).get().await()
                 .documents.mapNotNull { it.getString("itemId") }.distinct()
             if (itemIds.isEmpty()) continue
-            // Owner-only: a batch that touches someone else's item would fail the whole commit.
-            val mine = items.whereIn(com.google.firebase.firestore.FieldPath.documentId(), itemIds.take(30)).get().await()
-                .documents.filter { it.getString("userId") == user }
-            val stale = mine.filter { doc ->
+            // Per-document gets, NOT a whereIn: a query is rejected wholesale when any matching doc is
+            // unreadable, which is the exact state being repaired here — the repair would deny itself.
+            // A single get() is evaluated against its own doc, so a co-member's item just fails and skips.
+            val stale = itemIds.mapNotNull { id ->
+                val doc = runCatching { items.document(id).get().await() }.getOrNull() ?: return@mapNotNull null
+                if (doc.getString("userId") != user) return@mapNotNull null // only the owner may rewrite visibleTo
                 val visible = doc.get("visibleTo") as? List<*> ?: emptyList<Any>()
-                !visible.containsAll(space.memberIds)
+                doc.reference.takeIf { !visible.containsAll(space.memberIds) }
             }
             if (stale.isEmpty()) continue
             val batch = db.batch()
-            stale.forEach { batch.update(it.reference, "visibleTo", FieldValue.arrayUnion(*space.memberIds.toTypedArray())) }
+            stale.forEach { batch.update(it, "visibleTo", FieldValue.arrayUnion(*space.memberIds.toTypedArray())) }
             runCatching { batch.commit().await() }
                 .onFailure { Log.w("Thingy", "visibility backfill failed for ${space.id}", it) }
         }

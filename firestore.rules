@@ -9,23 +9,33 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function ownsExisting() { return signedIn() && resource.data.userId == request.auth.uid; }
     function ownsIncoming() { return signedIn() && request.resource.data.userId == request.auth.uid; }
+    // Every denormalized array below is read with data.get(field, []) rather than data.field. A doc
+    // written before that field existed (legacy space / pre-visibleTo item) makes `uid in data.field`
+    // an *evaluation error*, which Firestore reports as PERMISSION_DENIED — indistinguishable from a
+    // real denial, and it rejects the whole query, not just the offending doc. Defaulting to [] makes
+    // a missing field mean "not shared" instead of taking the request down.
     function isMember(spaceId) {
-      return request.auth.uid in get(/databases/$(database)/documents/spaces/$(spaceId)).data.memberIds;
+      let space = get(/databases/$(database)/documents/spaces/$(spaceId));
+      return space != null && (
+        space.data.get('userId', '') == request.auth.uid ||
+        request.auth.uid in space.data.get('memberIds', [])
+      );
     }
     function isOwner(spaceId) {
-      return get(/databases/$(database)/documents/spaces/$(spaceId)).data.userId == request.auth.uid;
+      let space = get(/databases/$(database)/documents/spaces/$(spaceId));
+      return space != null && space.data.get('userId', '') == request.auth.uid;
     }
 
     match /items/{id} {
       // visibleTo is the denormalized union of memberIds across every shared space the item is in
-      allow read: if signedIn() && (resource.data.userId == request.auth.uid || request.auth.uid in resource.data.visibleTo);
+      allow read: if signedIn() && (resource.data.userId == request.auth.uid || request.auth.uid in resource.data.get('visibleTo', []));
       allow create: if ownsIncoming();
       // owner can edit anything; anyone who can already see the item (or is granting/removing
       // *themself*, e.g. joining/leaving a shared space) may touch visibleTo and nothing else
       allow update: if (ownsExisting() && ownsIncoming()) || (
         signedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['visibleTo']) && (
-          request.auth.uid in resource.data.visibleTo ||
-          (!(request.auth.uid in resource.data.visibleTo) && request.auth.uid in request.resource.data.visibleTo)
+          request.auth.uid in resource.data.get('visibleTo', []) ||
+          request.auth.uid in request.resource.data.get('visibleTo', [])
         )
       );
       allow delete: if ownsExisting();
@@ -33,17 +43,17 @@ service cloud.firestore {
 
     match /spaces/{id} {
       // owner fallback covers pre-sharing docs that haven't been backfilled with memberIds yet
-      allow read: if signedIn() && (resource.data.userId == request.auth.uid || request.auth.uid in resource.data.memberIds);
+      allow read: if signedIn() && (resource.data.userId == request.auth.uid || request.auth.uid in resource.data.get('memberIds', []));
       allow create: if signedIn() && request.resource.data.memberIds == [request.auth.uid]
         && request.resource.data.userId == request.auth.uid;
       // owner can edit freely; a non-owner may edit while remaining a member, or add/remove *themself* (join/leave)
       allow update: if signedIn() && (
         resource.data.userId == request.auth.uid ||
-        (request.auth.uid in resource.data.memberIds && request.auth.uid in request.resource.data.memberIds) ||
-        (!(request.auth.uid in resource.data.memberIds) && request.auth.uid in request.resource.data.memberIds
-          && request.resource.data.memberIds.size() == resource.data.memberIds.size() + 1) ||
-        (request.auth.uid in resource.data.memberIds && !(request.auth.uid in request.resource.data.memberIds)
-          && request.resource.data.memberIds.size() == resource.data.memberIds.size() - 1)
+        (request.auth.uid in resource.data.get('memberIds', []) && request.auth.uid in request.resource.data.get('memberIds', [])) ||
+        (!(request.auth.uid in resource.data.get('memberIds', [])) && request.auth.uid in request.resource.data.get('memberIds', [])
+          && request.resource.data.get('memberIds', []).size() == resource.data.get('memberIds', []).size() + 1) ||
+        (request.auth.uid in resource.data.get('memberIds', []) && !(request.auth.uid in request.resource.data.get('memberIds', []))
+          && request.resource.data.get('memberIds', []).size() == resource.data.get('memberIds', []).size() - 1)
       );
       allow delete: if ownsExisting();
     }
