@@ -11,6 +11,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,15 +19,25 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.TextButton
@@ -53,6 +64,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -191,183 +203,202 @@ fun SettingsScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(28.dp),
         ) {
-            Avatar(user?.photoUrl?.toString(), size = 96.dp)
-            user?.displayName?.takeIf { it.isNotBlank() }?.let {
-                Text(it, style = MaterialTheme.typography.headlineSmall)
-            }
-            user?.email?.let {
-                Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-
-            // Animated glyph counter — rolls up once per session.
-            RollingCounterStat(
-                count = items.size,
-                label = "Thingies saved",
-                modifier = Modifier.padding(top = 12.dp),
-            )
-            if (spaces.isNotEmpty()) {
-                Text(
-                    "across ${spaces.size} space${if (spaces.size == 1) "" else "s"}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            // Identity block — the one part of the page that's about *you*, not a setting.
+            Column(
+                Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Avatar(user?.photoUrl?.toString(), size = 96.dp)
+                Spacer(Modifier.height(8.dp))
+                user?.displayName?.takeIf { it.isNotBlank() }?.let {
+                    Text(it, style = MaterialTheme.typography.headlineSmall)
+                }
+                user?.email?.let {
+                    Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                RollingCounterStat(
+                    count = items.size,
+                    label = "Thingies saved",
+                    modifier = Modifier.padding(top = 12.dp),
                 )
-            }
-
-            if (dynamicColorSupported) {
-                Text("Color", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 20.dp))
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    val options = ColorSource.entries
-                    options.forEachIndexed { i, source ->
-                        SegmentedButton(
-                            selected = source == colorSource,
-                            onClick = { scope.launch { settings.setColorSource(source) } },
-                            shape = SegmentedButtonDefaults.itemShape(i, options.size),
-                        ) { Text(source.name.lowercase().replaceFirstChar { it.uppercase() }) }
-                    }
+                if (spaces.isNotEmpty()) {
+                    Text(
+                        "across ${spaces.size} space${if (spaces.size == 1) "" else "s"}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
 
-            Text("Spaces layout", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 20.dp))
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                val layouts = SpacesLayout.entries
-                layouts.forEachIndexed { i, layout ->
-                    SegmentedButton(
-                        selected = layout == spacesLayout,
-                        onClick = { scope.launch { settings.setSpacesLayout(layout) } },
-                        shape = SegmentedButtonDefaults.itemShape(i, layouts.size),
-                    ) { Text(layout.name.lowercase().replaceFirstChar { it.uppercase() }) }
+            if (dynamicColorSupported) {
+                SettingsSection("Appearance") {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Filled.Palette, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                            Text("Color", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                            val options = ColorSource.entries
+                            options.forEachIndexed { i, source ->
+                                SegmentedButton(
+                                    selected = source == colorSource,
+                                    onClick = { scope.launch { settings.setColorSource(source) } },
+                                    shape = SegmentedButtonDefaults.itemShape(i, options.size),
+                                ) { Text(source.name.lowercase().replaceFirstChar { it.uppercase() }) }
+                            }
+                        }
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest)
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Filled.ViewAgenda, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                            Text("Spaces layout", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                            val layouts = SpacesLayout.entries
+                            layouts.forEachIndexed { i, layout ->
+                                SegmentedButton(
+                                    selected = layout == spacesLayout,
+                                    onClick = { scope.launch { settings.setSpacesLayout(layout) } },
+                                    shape = SegmentedButtonDefaults.itemShape(i, layouts.size),
+                                ) { Text(layout.name.lowercase().replaceFirstChar { it.uppercase() }) }
+                            }
+                        }
+                    }
                 }
             }
 
             // Smart search: on-device semantic search. Enabling downloads the model once (kept out
             // of the APK to keep it small); once present it indexes existing items and runs offline.
-            Text("Search", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 20.dp))
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Smart search", style = MaterialTheme.typography.bodyLarge)
-                    fun mb(b: Long) = "%.1f MB".format(b / 1_000_000.0)
-                    val status = when {
-                        downloading && dlTotal > 0 -> "Downloading model - ${mb(dlBytes)} / ${mb(dlTotal)}"
-                        downloading -> "Downloading model…"
-                        smartSearch && downloadFailed -> "Download failed. Try Again?"
-                        smartSearch && modelReady -> "Semantic search"
-                        smartSearch -> "Preparing…"
-                        else -> "Search by meaning, not just words. One-time ~few-MB download, then offline."
-                    }
-                    Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            SettingsSection("Search") {
+                fun mb(b: Long) = "%.1f MB".format(b / 1_000_000.0)
+                val status = when {
+                    downloading && dlTotal > 0 -> "Downloading model — ${mb(dlBytes)} / ${mb(dlTotal)}"
+                    downloading -> "Downloading model…"
+                    smartSearch && downloadFailed -> "Download failed. Try again?"
+                    smartSearch && modelReady -> "Semantic search is on"
+                    smartSearch -> "Preparing…"
+                    else -> "Semantic search off."
                 }
-                Switch(
-                    checked = smartSearch,
-                    enabled = !downloading,
-                    onCheckedChange = { on ->
-                        scope.launch {
-                            settings.setSmartSearch(on)
-                            if (on && !embedder.isReady()) {
-                                downloading = true; downloadFailed = false; dlBytes = 0L; dlTotal = 0L
-                                val ok = embedder.download { done, total -> dlBytes = done; dlTotal = total }
-                                downloading = false; downloadFailed = !ok; modelReady = ok
-                                if (ok) launch(Dispatchers.IO) { runCatching { embedder.backfill(itemRepository) } }
-                            }
-                        }
-                    },
-                )
-            }
-            if (downloading) {
-                if (dlTotal > 0) {
-                    LinearProgressIndicator(
-                        progress = { (dlBytes.toFloat() / dlTotal).coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                } else {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
-            }
-
-            // App & Update status card
-            Text("App & Updates", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 20.dp))
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    Modifier.fillMaxWidth().padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Thingy v${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
-                        fun mb(b: Long) = "%.1f MB".format(b / 1_000_000.0)
-                        val statusText = when {
-                            updateDownloading && updateDlTotal > 0 -> "Downloading — ${mb(updateDlBytes)} / ${mb(updateDlTotal)}"
-                            updateDownloading -> "Downloading update…"
-                            availableUpdate != null -> "New update v${availableUpdate?.version} available!"
-                            checkingUpdate -> "Checking for updates…"
-                            checkStatus != null -> checkStatus!!
-                            else -> "App is up to date"
-                        }
-                        Text(
-                            statusText,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (availableUpdate != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        if (updateDownloading) {
-                            Spacer(Modifier.height(6.dp))
-                            if (updateDlTotal > 0) {
-                                LinearProgressIndicator(
-                                    progress = { (updateDlBytes.toFloat() / updateDlTotal).coerceIn(0f, 1f) },
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                            } else {
-                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                            }
-                        }
-                    }
-                    if (availableUpdate != null) {
-                        Button(
-                            onClick = { showUpdateSheet = true },
-                            shapes = expressiveButtonShapes()
-                        ) {
-                            Text(if (updateDownloading) "Downloading…" else "Update")
-                        }
-                    } else {
-                        OutlinedButton(
-                            enabled = !checkingUpdate,
-                            onClick = {
+                ListItem(
+                    headlineContent = { Text("Smart search") },
+                    supportingContent = { Text(status) },
+                    leadingContent = { Icon(Icons.Filled.Search, contentDescription = null) },
+                    trailingContent = {
+                        Switch(
+                            checked = smartSearch,
+                            enabled = !downloading,
+                            onCheckedChange = { on ->
                                 scope.launch {
-                                    checkingUpdate = true
-                                    checkStatus = null
-                                    val res = runCatching { updateChecker.check(BuildConfig.VERSION_NAME) }.getOrNull()
-                                    checkingUpdate = false
-                                    if (res != null) {
-                                        availableUpdate = res
-                                        showUpdateSheet = true
-                                    } else {
-                                        checkStatus = "Latest version installed"
+                                    settings.setSmartSearch(on)
+                                    if (on && !embedder.isReady()) {
+                                        downloading = true; downloadFailed = false; dlBytes = 0L; dlTotal = 0L
+                                        val ok = embedder.download { done, total -> dlBytes = done; dlTotal = total }
+                                        downloading = false; downloadFailed = !ok; modelReady = ok
+                                        if (ok) launch(Dispatchers.IO) { runCatching { embedder.backfill(itemRepository) } }
                                     }
                                 }
                             },
-                            shapes = expressiveButtonShapes()
-                        ) {
-                            Text(if (checkingUpdate) "Checking…" else "Check")
+                        )
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+                if (downloading) {
+                    Box(Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp)) {
+                        if (dlTotal > 0) {
+                            LinearProgressIndicator(
+                                progress = { (dlBytes.toFloat() / dlTotal).coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } else {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                         }
                     }
                 }
             }
 
-            OutlinedButton(onClick = onSignOut, shapes = expressiveButtonShapes(), modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Sign out") }
+            SettingsSection("Updates") {
+                fun mb(b: Long) = "%.1f MB".format(b / 1_000_000.0)
+                val statusText = when {
+                    updateDownloading && updateDlTotal > 0 -> "Downloading — ${mb(updateDlBytes)} / ${mb(updateDlTotal)}"
+                    updateDownloading -> "Downloading update…"
+                    availableUpdate != null -> "New update v${availableUpdate?.version} available!"
+                    checkingUpdate -> "Checking for updates…"
+                    checkStatus != null -> checkStatus!!
+                    else -> "App is up to date"
+                }
+                ListItem(
+                    headlineContent = { Text("Thingy v${BuildConfig.VERSION_NAME}") },
+                    supportingContent = {
+                        Text(
+                            statusText,
+                            color = if (availableUpdate != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    },
+                    leadingContent = { Icon(Icons.Filled.SystemUpdate, contentDescription = null) },
+                    trailingContent = {
+                        if (availableUpdate != null) {
+                            Button(onClick = { showUpdateSheet = true }, shapes = expressiveButtonShapes()) {
+                                Text(if (updateDownloading) "Downloading…" else "Update")
+                            }
+                        } else {
+                            OutlinedButton(
+                                enabled = !checkingUpdate,
+                                onClick = {
+                                    scope.launch {
+                                        checkingUpdate = true
+                                        checkStatus = null
+                                        val res = runCatching { updateChecker.check(BuildConfig.VERSION_NAME) }.getOrNull()
+                                        checkingUpdate = false
+                                        if (res != null) {
+                                            availableUpdate = res
+                                            showUpdateSheet = true
+                                        } else {
+                                            checkStatus = "Latest version installed"
+                                        }
+                                    }
+                                },
+                                shapes = expressiveButtonShapes(),
+                            ) {
+                                Text(if (checkingUpdate) "Checking…" else "Check")
+                            }
+                        }
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+                if (updateDownloading) {
+                    Box(Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp)) {
+                        if (updateDlTotal > 0) {
+                            LinearProgressIndicator(
+                                progress = { (updateDlBytes.toFloat() / updateDlTotal).coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } else {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                }
+            }
 
-            Text("Danger zone", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 20.dp))
-            OutlinedButton(
-                onClick = { showDeleteAccountDialog = true },
-                shapes = expressiveButtonShapes(),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Delete account") }
+            SettingsSection("Account") {
+                ListItem(
+                    headlineContent = { Text("Sign out") },
+                    leadingContent = { Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null) },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    modifier = Modifier.clickable(onClick = onSignOut),
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest)
+                ListItem(
+                    headlineContent = { Text("Delete account", color = MaterialTheme.colorScheme.error) },
+                    leadingContent = { Icon(Icons.Filled.DeleteForever, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    modifier = Modifier.clickable { showDeleteAccountDialog = true },
+                )
+            }
         }
     }
 
@@ -408,6 +439,26 @@ fun SettingsScreen(
                 },
                 onDismiss = { showUpdateSheet = false },
             )
+        }
+    }
+}
+
+/** A titled group of related settings, rendered as one rounded card — the M3 "grouped list" shape. */
+@Composable
+private fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            title,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(start = 4.dp),
+        )
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(content = content)
         }
     }
 }

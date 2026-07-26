@@ -154,7 +154,7 @@ fun OnboardingScreen(onStart: () -> Unit) {
                     Feature(
                         MaterialShapes.Sunny, MaterialShapes.VerySunny, Icons.Filled.PhotoLibrary,
                         MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer,
-                        "Spaces & Tidy", "Themed shelves, plus a swipe to declutter.",
+                        "Spaces, shared or not", "Themed shelves you can invite friends into, plus a swipe to declutter.",
                     )
                 }
             }
