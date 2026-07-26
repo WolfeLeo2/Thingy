@@ -260,11 +260,24 @@ fun MainShell(
         }
 
         if (addingSelectionToSpace) {
+            // The writes run on MainShell's scope, not the dialog's: dismissing the dialog tears down a
+            // rememberCoroutineScope inside it, which cancelled the Firestore batch before it committed.
+            val fileSelection: (suspend () -> String) -> Unit = { resolveSpaceId ->
+                val ids = selectedIds.toList()
+                addingSelectionToSpace = false
+                selectedIds.clear()
+                scope.launch {
+                    val spaceId = resolveSpaceId()
+                    spaceRepository.addItemsToSpace(ids, spaceId)
+                    ids.forEach { classifier.steerItemForSpace(it, spaceId) }
+                }
+            }
             AddManyToSpaceDialog(
-                itemIds = selectedIds.toList(),
+                count = selectedIds.size,
                 spaceRepository = spaceRepository,
-                classifier = classifier,
-                onDone = { addingSelectionToSpace = false; selectedIds.clear() },
+                onPick = { spaceId -> fileSelection { spaceId } },
+                onCreateSpace = { name -> fileSelection { spaceRepository.createSpace(name) } },
+                onDismiss = { addingSelectionToSpace = false },
             )
         }
 
