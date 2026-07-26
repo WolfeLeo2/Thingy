@@ -81,5 +81,12 @@ service cloud.firestore {
       allow update: if signedIn() && isMember(resource.data.spaceId) && isMember(request.resource.data.spaceId);
       allow delete: if signedIn() && isMember(resource.data.spaceId);
     }
+
+    // Self-service account deletion marker: doc id == uid, so "own this row" is just an id check.
+    // The nightly purge workflow (tools/account-purge) reads/writes these with the Admin SDK,
+    // which bypasses rules entirely — these rules only govern the client.
+    match /accountDeletions/{uid} {
+      allow read, create, delete: if signedIn() && request.auth.uid == uid;
+    }
   }
 }

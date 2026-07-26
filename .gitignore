@@ -17,3 +17,5 @@ build/
 .claude/
 .agents/
 .tokensave/
+
+node_modules/

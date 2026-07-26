@@ -1,0 +1,12 @@
+{
+  "name": "account-purge",
+  "private": true,
+  "type": "module",
+  "description": "Nightly purge of Thingy accounts 30+ days past their deletion request. Run via .github/workflows/purge-deleted-accounts.yml — not called from the app.",
+  "scripts": {
+    "start": "node purge.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.2.0"
+  }
+}

@@ -1,0 +1,32 @@
+name: Purge deleted accounts
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # daily, 06:00 UTC
+  workflow_dispatch: {}
+
+concurrency:
+  group: purge-deleted-accounts
+  cancel-in-progress: false
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/account-purge
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - run: npm ci
+
+      - name: Purge accounts past the 30-day retention window
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+          CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+        run: node purge.js

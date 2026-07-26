@@ -123,14 +123,41 @@ fun AppRoot(
         }
     }
 
+    // Checked once per uid (not a Firestore listener — this is a one-off gate, not something that
+    // needs to react live). null uid = not signed in; the deletion check itself resolving is
+    // tracked separately so the gate below can't flash Home before it's known.
+    var pendingDeletionCheckedFor by remember { mutableStateOf<String?>(null) }
+    var pendingDeletionRequestedAt by remember { mutableStateOf<java.util.Date?>(null) }
+    LaunchedEffect(user?.uid) {
+        val uid = user?.uid
+        pendingDeletionRequestedAt = if (uid != null) runCatching { auth.pendingDeletionRequestedAt(uid) }.getOrNull() else null
+        pendingDeletionCheckedFor = uid
+    }
+    val pendingDeletionKnown = user == null || pendingDeletionCheckedFor == user?.uid
+
     val rootKey: NavKey? = when {
-        onboarded == null -> null
+        onboarded == null || !pendingDeletionKnown -> null
         user == null -> Login
         onboarded == false -> Onboarding
         else -> Home
     }
     if (rootKey == null) {
         Surface(modifier = Modifier.fillMaxSize()) {}
+        return
+    }
+
+    val deletionRequestedAt = pendingDeletionRequestedAt
+    if (user != null && deletionRequestedAt != null) {
+        AccountPendingDeletionScreen(
+            requestedAt = deletionRequestedAt,
+            onCancelDeletion = {
+                scope.launch {
+                    runCatching { auth.cancelAccountDeletion() }
+                    pendingDeletionRequestedAt = null
+                }
+            },
+            onSignOut = { auth.signOut() },
+        )
         return
     }
 

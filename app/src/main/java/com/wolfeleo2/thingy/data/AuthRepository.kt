@@ -12,12 +12,19 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.Co
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
+import java.util.Date
 
-class AuthRepository(private val auth: FirebaseAuth = FirebaseAuth.getInstance()) {
+class AuthRepository(
+    private val auth: FirebaseAuth = FirebaseAuth.getInstance(),
+    private val db: FirebaseFirestore = FirebaseFirestore.getInstance(),
+) {
+    private val accountDeletions get() = db.collection("accountDeletions")
     val currentUser: FirebaseUser? get() = auth.currentUser
 
     val authState: Flow<FirebaseUser?> = callbackFlow {
@@ -53,4 +60,26 @@ class AuthRepository(private val auth: FirebaseAuth = FirebaseAuth.getInstance()
 
 
     fun signOut() = auth.signOut()
+
+    /**
+     * Marks the account for deletion and signs out immediately. The actual data purge (Firestore
+     * docs, Cloudinary assets, the Auth user itself) runs 30 days later via the scheduled
+     * tools/account-purge GitHub Action, not from the client — signing back in before then and
+     * calling [cancelAccountDeletion] is the undo path.
+     */
+    suspend fun requestAccountDeletion() {
+        val uid = auth.currentUser?.uid ?: return
+        accountDeletions.document(uid)
+            .set(mapOf("userId" to uid, "requestedAt" to FieldValue.serverTimestamp()))
+            .await()
+        signOut()
+    }
+
+    suspend fun cancelAccountDeletion() {
+        val uid = auth.currentUser?.uid ?: return
+        accountDeletions.document(uid).delete().await()
+    }
+
+    suspend fun pendingDeletionRequestedAt(uid: String): Date? =
+        accountDeletions.document(uid).get().await().getDate("requestedAt")
 }

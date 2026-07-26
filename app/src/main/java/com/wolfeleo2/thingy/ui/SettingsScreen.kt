@@ -24,9 +24,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Scaffold
@@ -93,6 +96,7 @@ fun SettingsScreen(
 ) {
     val scope = rememberCoroutineScope()
     val user = auth.currentUser
+    var showDeleteAccountDialog by remember { mutableStateOf(false) }
     val colorSource by settings.colorSource.collectAsStateWithLifecycle(ColorSource.DYNAMIC)
     val spacesLayout by settings.spacesLayout.collectAsStateWithLifecycle(SpacesLayout.GRID)
     val smartSearch by settings.smartSearchEnabled.collectAsStateWithLifecycle(false)
@@ -356,7 +360,37 @@ fun SettingsScreen(
             }
 
             OutlinedButton(onClick = onSignOut, shapes = expressiveButtonShapes(), modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Sign out") }
+
+            Text("Danger zone", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 20.dp))
+            OutlinedButton(
+                onClick = { showDeleteAccountDialog = true },
+                shapes = expressiveButtonShapes(),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Delete account") }
         }
+    }
+
+    if (showDeleteAccountDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteAccountDialog = false },
+            title = { Text("Delete account?") },
+            text = {
+                Text(
+                    "You'll be signed out immediately. Everything you've saved is permanently " +
+                        "deleted after 30 days — sign back in before then to cancel."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteAccountDialog = false
+                    scope.launch { runCatching { auth.requestAccountDeletion() } }
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteAccountDialog = false }) { Text("Cancel") }
+            },
+        )
     }
 
     if (showUpdateSheet) {
