@@ -11,9 +11,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -205,7 +207,9 @@ fun AddManyToSpaceDialog(
         onDismissRequest = onDismiss,
         title = { Text("Add $count ${if (count == 1) "thingy" else "thingies"} to…") },
         text = {
-            Column {
+            // AlertDialog clamps its text slot but doesn't scroll it — without this the New space row,
+            // being last, becomes unreachable once you have a screenful of spaces.
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 spaces.forEach { space ->
                     Row(
                         Modifier.fillMaxWidth().clickable { onPick(space.id) }.padding(vertical = 12.dp),
@@ -244,7 +248,7 @@ fun ManageSpacesDialog(
         onDismissRequest = onDismiss,
         title = { Text("Add to space") },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 spaces.forEach { space ->
                     val inSpace = space.id in bySpace
                     Row(
