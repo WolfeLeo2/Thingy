@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import coil3.compose.rememberAsyncImagePainter
+import com.mapbox.bindgen.Value
 import com.mapbox.geojson.Point
 import com.mapbox.maps.Style
 import com.mapbox.maps.extension.compose.MapEffect
@@ -317,7 +318,11 @@ private fun MapboxBody(
         scaleBar = {}
     ) {
         MapEffect(darkTheme) { mapView ->
-            mapView.mapboxMap.loadStyle(if (darkTheme) Style.DARK else Style.STANDARD)
+            mapView.mapboxMap.loadStyle(Style.STANDARD) { style ->
+                style.setStyleImportConfigProperty(
+                    "basemap", "lightPreset", Value(if (darkTheme) "night" else "day")
+                )
+            }
         }
 
         clusters.forEach { cluster ->
