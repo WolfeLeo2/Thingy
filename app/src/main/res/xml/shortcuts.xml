@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Declares MainActivity as a Direct Share target. The actual per-space entries are published at
+  runtime as dynamic long-lived shortcuts (SpaceShortcuts.kt); this only tells the system which
+  mime types those shortcuts accept. Keep the mime types in sync with the ACTION_SEND
+  intent-filters in AndroidManifest.xml — a share-target for a type the activity can't receive
+  never appears.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <share-target android:targetClass="com.wolfeleo2.thingy.MainActivity">
+        <data android:mimeType="image/*" />
+        <data android:mimeType="text/*" />
+        <category android:name="com.wolfeleo2.thingy.category.SAVE_TO_SPACE" />
+    </share-target>
+</shortcuts>

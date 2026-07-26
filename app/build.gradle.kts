@@ -132,6 +132,7 @@ dependencies {
     // Settings + coroutines + WorkManager + CommonMark
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.glance.appwidget)
     implementation(libs.commonmark)
     implementation(libs.material.kolor)
     implementation(libs.zxing.core)
@@ -144,6 +145,7 @@ dependencies {
     implementation(libs.androidx.camera.view)
     implementation(libs.androidx.exifinterface)
     implementation(libs.mlkit.subject.segmentation)
+    implementation(libs.mlkit.text.recognition)
     // Media3 (Video Transcoding & Playback)
     implementation(libs.androidx.media3.transformer)
     implementation(libs.androidx.media3.effect)

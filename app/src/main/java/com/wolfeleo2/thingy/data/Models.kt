@@ -71,6 +71,7 @@ data class Item(
     val intents: List<Intent>? = null,
     val products: List<Product>? = null,
     val productsStatus: String? = null,    // ProductsStatus.wire
+    val ocrText: String? = null,          // text read out of an image by ML Kit; folded into searchText
     val searchText: String = "",
     val embedding: List<Double>? = null,  // on-device semantic-search vector (L2-normalized); null until indexed
     val visibleTo: List<String> = emptyList(),  // denormalized union of memberIds of every shared space this item is in

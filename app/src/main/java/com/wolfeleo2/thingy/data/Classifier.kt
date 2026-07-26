@@ -14,6 +14,9 @@ import com.google.firebase.ai.type.Schema
 import com.google.firebase.ai.type.Tool
 import com.google.firebase.ai.type.content
 import com.google.firebase.ai.type.generationConfig
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -56,6 +59,9 @@ class Classifier(
             },
             systemInstruction = system?.let { content { text(it) } },
         )
+
+    /** Latin-script OCR. Play-Services variant — the model ships with Play Services, not the APK. */
+    private val textRecognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
 
     private val inFlight = Collections.synchronizedSet(mutableSetOf<String>())
     // Free Gemini tier rate-limits concurrent requests — cap in-flight classifications so a batch
@@ -111,6 +117,7 @@ class Classifier(
         val spacesBlock = spacesPromptBlock(dynamic)
 
         var page: Page? = null
+        var ocrText: String? = null
         val model = genModel(ANALYSIS_SCHEMA, SYSTEM_PROMPT)
         val response = when (item.type) {
             ItemType.LINK.wire -> {
@@ -125,6 +132,7 @@ class Classifier(
             ItemType.IMAGE.wire -> {
                 val bmp = loadBitmap(item.imageUrl, item.storagePath)
                     ?: throw IllegalStateException("Image not readable")
+                ocrText = recognizeText(bmp)
                 model.generateContent(content { text(mediaPrompt(isVideo = false, spacesBlock)); image(bmp) })
             }
             ItemType.VIDEO.wire -> {
@@ -158,6 +166,7 @@ class Classifier(
             siteName = if (item.type == ItemType.LINK.wire) page?.siteName else null,
             heroImageUrl = if (item.type == ItemType.LINK.wire) page?.heroImageUrl else null,
             aspectRatio = if (item.type == ItemType.LINK.wire) page?.aspectRatio else null,
+            ocrText = ocrText,
         )
         spaces.suggestSpaces(item.id, spaceIds)
         // Steer any spaces the item was already filed into while it was processing.
@@ -479,6 +488,15 @@ class Classifier(
         }
     }
 
+    /**
+     * Reads any text in the image (screenshots, signs, receipts) so it lands in the item's
+     * searchText. Best-effort: OCR failing must never fail the classification, and an image with
+     * no text returns null rather than an empty field.
+     */
+    private suspend fun recognizeText(bitmap: Bitmap): String? = runCatching {
+        normalizeOcrText(textRecognizer.process(InputImage.fromBitmap(bitmap, 0)).await().text, OCR_MAX_CHARS)
+    }.onFailure { Log.w("Thingy", "OCR failed", it) }.getOrNull()
+
     private fun spacesPromptBlock(spaces: List<Space>): String {
         if (spaces.isEmpty()) return "The user has no spaces yet, so spaceNames must be an empty array."
         val lines = spaces.joinToString("\n") { "- \"${it.name}\"${it.description?.let { d -> ": $d" } ?: ""}" }
@@ -523,6 +541,7 @@ class Classifier(
         const val MAX_ATTEMPTS = 3     // retries before a transient failure becomes `failed`
         const val UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         const val MAX_CONTENT_CHARS = 8000
+        const val OCR_MAX_CHARS = 2000 // keeps the doc small; a wall of OCR shouldn't drown searchText
         const val MAX_STORED_CONTENT_CHARS = 100000
         const val MAX_PRODUCTS = 5
 
@@ -575,6 +594,16 @@ class Classifier(
         val STEER_SCHEMA: Schema = Schema.obj(mapOf("intents" to Schema.array(INTENT_SCHEMA)))
     }
 }
+
+private val WHITESPACE_RUN = Regex("\\s+")
+
+/**
+ * Collapses ML Kit's line-broken OCR output into one searchable blob and caps it, so a dense
+ * screenshot can't bloat the Firestore doc or drown the real fields in searchText. Returns null
+ * for an image with no readable text — the field stays absent rather than empty.
+ */
+internal fun normalizeOcrText(raw: String, max: Int): String? =
+    raw.replace(WHITESPACE_RUN, " ").trim().take(max).takeIf { it.isNotBlank() }
 
 private val PINTEREST_PIN_ID = Regex("/pin/(\\d+)")
 

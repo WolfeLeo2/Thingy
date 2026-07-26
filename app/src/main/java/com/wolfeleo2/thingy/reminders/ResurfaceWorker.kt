@@ -12,9 +12,12 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.wolfeleo2.thingy.MainActivity
 import com.wolfeleo2.thingy.R
+import com.wolfeleo2.thingy.data.Item
 import com.wolfeleo2.thingy.data.ItemRepository
 import com.wolfeleo2.thingy.data.SettingsRepository
 import com.wolfeleo2.thingy.data.displayTitle
+import com.wolfeleo2.thingy.ui.previewModel
+import com.wolfeleo2.thingy.ui.widget.ThingyWidget
 import kotlinx.coroutines.flow.firstOrNull
 import java.util.Calendar
 
@@ -30,31 +33,19 @@ class ResurfaceWorker(
         val items = itemRepository.items().firstOrNull().orEmpty()
         if (items.isEmpty()) return Result.success()
 
-        val today = Calendar.getInstance()
-        val todayMonth = today.get(Calendar.MONTH)
-        val todayDay = today.get(Calendar.DAY_OF_MONTH)
-        val todayYear = today.get(Calendar.YEAR)
-
-        // 1. Check for exact anniversary items (saved on same day/month in a previous year)
-        var resurfaceTarget = items.firstOrNull { item ->
-            item.createdAt?.let { date ->
-                val cal = Calendar.getInstance().apply { time = date }
-                cal.get(Calendar.MONTH) == todayMonth &&
-                        cal.get(Calendar.DAY_OF_MONTH) == todayDay &&
-                        cal.get(Calendar.YEAR) < todayYear
-            } ?: false
-        }
-
-        // 2. Fallback for newer installs: pick a random item created at least 14 days ago
-        if (resurfaceTarget == null) {
-            val fourteenDaysAgo = System.currentTimeMillis() - (14L * 24 * 60 * 60 * 1000)
-            resurfaceTarget = items.filter { (it.createdAt?.time ?: 0L) < fourteenDaysAgo }.randomOrNull()
-        }
-
-        val target = resurfaceTarget ?: return Result.success()
+        val target = pickResurfaceTarget(items, System.currentTimeMillis()) ?: return Result.success()
 
         // Set resurfaced item ID in DataStore settings
         settingsRepository.setResurfacedItemId(target.id)
+
+        // Cache a flat snapshot for the home-screen widget — it can't read Firestore itself — and
+        // repaint it. Local file only: the widget has no network path to a Cloudinary URL.
+        settingsRepository.setWidgetCard(
+            itemId = target.id,
+            title = target.displayTitle(),
+            thumbPath = (target.previewModel(context) as? java.io.File)?.absolutePath,
+        )
+        ThingyWidget.refresh(context)
 
         // Post system notification if permissions are granted
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -97,4 +88,35 @@ class ResurfaceWorker(
 
         return Result.success()
     }
+}
+
+/** Older than this and an item is fair game for the random fallback. */
+private const val RESURFACE_MIN_AGE_MS = 14L * 24 * 60 * 60 * 1000
+
+/**
+ * Today's "remember this?" pick, shown both as a notification and on the home-screen widget.
+ *
+ * An exact anniversary (same day and month, an earlier year) always wins; failing that — which is
+ * every install younger than a year — any save at least [RESURFACE_MIN_AGE_MS] old, at random, so
+ * the feature isn't dead for new users. Null when nothing qualifies; the caller then does nothing
+ * rather than resurfacing something the user saved this morning.
+ *
+ * [items] is expected newest-first, as [ItemRepository.items] returns it.
+ */
+internal fun pickResurfaceTarget(items: List<Item>, nowMs: Long): Item? {
+    val today = Calendar.getInstance().apply { timeInMillis = nowMs }
+    val anniversary = items.firstOrNull { item ->
+        item.createdAt?.let { date ->
+            val cal = Calendar.getInstance().apply { time = date }
+            cal.get(Calendar.MONTH) == today.get(Calendar.MONTH) &&
+                cal.get(Calendar.DAY_OF_MONTH) == today.get(Calendar.DAY_OF_MONTH) &&
+                cal.get(Calendar.YEAR) < today.get(Calendar.YEAR)
+        } ?: false
+    }
+    if (anniversary != null) return anniversary
+    // createdAt is a @ServerTimestamp: null means the write hasn't been acked yet, i.e. the item is
+    // seconds old — the opposite of resurfaceable. Treating null as epoch (the old `?: 0L`) made a
+    // just-saved item eligible as a "memory".
+    return items.filter { it.createdAt != null && it.createdAt.time < nowMs - RESURFACE_MIN_AGE_MS }
+        .randomOrNull()
 }

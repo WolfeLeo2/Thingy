@@ -13,8 +13,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wolfeleo2.thingy.data.AuthRepository
 import com.wolfeleo2.thingy.data.ColorSource
 import com.wolfeleo2.thingy.data.SettingsRepository
+import com.wolfeleo2.thingy.data.SpaceShortcuts
 import com.wolfeleo2.thingy.reminders.ReminderManager
 import com.wolfeleo2.thingy.ui.AppRoot
+import com.wolfeleo2.thingy.ui.widget.ThingyWidget
 import com.wolfeleo2.thingy.ui.theme.ThingyTheme
 
 class MainActivity : ComponentActivity() {
@@ -23,6 +25,12 @@ class MainActivity : ComponentActivity() {
     private val sharedImages = mutableStateOf<List<Uri>>(emptyList())
     private val openItemId = mutableStateOf<String?>(null)
     private val joinCode = mutableStateOf<String?>(null)
+    // Space picked in the share sheet (Direct Share target) — the share saves straight into it.
+    private val sharedSpaceId = mutableStateOf<String?>(null)
+    // Space shortcut tapped from the launcher's long-press menu — opens that space.
+    private val openSpaceId = mutableStateOf<String?>(null)
+    // Quick-capture button on the home-screen widget.
+    private val openCamera = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,9 +50,14 @@ class MainActivity : ComponentActivity() {
                     settings = settings,
                     serverClientId = serverClientId,
                     sharedText = sharedText.value,
-                    onSharedConsumed = { sharedText.value = null },
+                    onSharedConsumed = { sharedText.value = null; sharedSpaceId.value = null },
                     sharedImages = sharedImages.value,
-                    onImagesConsumed = { sharedImages.value = emptyList() },
+                    onImagesConsumed = { sharedImages.value = emptyList(); sharedSpaceId.value = null },
+                    sharedSpaceId = sharedSpaceId.value,
+                    openSpaceId = openSpaceId.value,
+                    onOpenSpaceConsumed = { openSpaceId.value = null },
+                    openCamera = openCamera.value,
+                    onOpenCameraConsumed = { openCamera.value = false },
                     openItemId = openItemId.value,
                     onOpenItemConsumed = { openItemId.value = null },
                     joinCode = joinCode.value,
@@ -65,6 +78,11 @@ class MainActivity : ComponentActivity() {
         intent.getStringExtra(ReminderManager.EXTRA_OPEN_ITEM_ID)?.let { id ->
             openItemId.value = id
         }
+        // Set by the system when the user picks one of our per-space Direct Share targets; the
+        // shortcut id is the space id (SpaceShortcuts). Read before the share payload below.
+        sharedSpaceId.value = intent.getStringExtra(Intent.EXTRA_SHORTCUT_ID)
+        intent.getStringExtra(SpaceShortcuts.EXTRA_SPACE_ID)?.let { openSpaceId.value = it }
+        if (intent.getBooleanExtra(ThingyWidget.EXTRA_OPEN_CAMERA, false)) openCamera.value = true
         val data = intent.data
         if (intent.action == Intent.ACTION_VIEW && data?.scheme == "thingy" && data.host == "join") {
             data.lastPathSegment?.let { joinCode.value = it }

@@ -49,6 +49,10 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="image/*" />
             </intent-filter>
+            <!-- Per-space Direct Share targets; entries published at runtime by SpaceShortcuts. -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
             <!-- Space invite links/QR: thingy://join/<code> -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -57,6 +61,18 @@
                 <data android:scheme="thingy" android:host="join" />
             </intent-filter>
         </activity>
+
+        <!-- Home-screen widget: today's resurfaced save + quick capture (Glance). -->
+        <receiver
+            android:name=".ui.widget.ThingyWidgetReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/thingy_widget_info" />
+        </receiver>
 
         <!-- Hands collage share-cards to other apps as content:// URIs. -->
         <provider

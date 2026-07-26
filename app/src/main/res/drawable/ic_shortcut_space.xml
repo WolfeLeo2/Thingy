@@ -1,0 +1,22 @@
+<!-- Shelf/space mark for the per-space share targets and launcher shortcuts. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+  <path
+      android:fillColor="#A8641A"
+      android:pathData="M0,0h48v48h-48z"/>
+  <path
+      android:fillColor="#FFFFFFFF"
+      android:pathData="M14,13h6v18h-6z"/>
+  <path
+      android:fillColor="#FFFFFFFF"
+      android:pathData="M22,17h5v14h-5z"/>
+  <path
+      android:fillColor="#FFFFFFFF"
+      android:pathData="M12,33h24v3h-24z"/>
+  <path
+      android:fillColor="#FFFFFFFF"
+      android:pathData="M29,20l5,-1l3,12l-5,1z"/>
+</vector>

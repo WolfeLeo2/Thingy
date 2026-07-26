@@ -1,98 +1,127 @@
-# Thingy Feature Roadmap & Implementation Plan
+# Thingy Feature Roadmap
 
-This document outlines the research, implementation steps, and testing strategies for the upcoming major features requested to elevate Thingy from a simple save-hub to a "living" personal intelligence tool.
+The first roadmap (ask-your-stuff, resurfacing, smart space suggestions, collage share, ambient
+theming) is **fully shipped** — see `MEMORY.md` / the shipped code for how each one actually landed,
+which differs from the original research in places (embeddings run on-device via TFLite, not
+Firestore Vector Search; there are no Cloud Functions anywhere — Spark plan).
 
----
-
-## 1. Ask-Your-Stuff (Natural Language Search)
-**Goal:** Enable true semantic search so users can query their saves naturally (e.g., "that sourdough article") instead of relying on exact substring matches.
-
-### Research Findings
-- **Gemini Embeddings:** The Google AI / Vertex AI SDK for Android supports generating text embeddings using `gemini-embedding-001`. This model converts text (like an item's title, AI-generated summary, and extracted notes) into a high-dimensional vector.
-- **Firestore Vector Search:** Firebase recently introduced native Vector Search for Android. We can store the embedding vector in a `VectorValue` field on each `Item` document in Firestore.
-- **Execution:** We will use `collection.findNearest("embedding", queryVector, 10, DistanceMeasure.COSINE)` to retrieve the top 10 most semantically relevant saves for any user query.
-
-### Implementation Plan
-1. **Ingestion Upgrade:** Update `Classifier.kt` to generate an embedding for every new item using the `gemini-embedding-001` model based on its AI-analyzed content.
-2. **Schema Update:** Add `embedding: List<Double>?` to the `Item` data class.
-3. **Search Screen UI:** Update the search bar to detect natural language. When the user types, generate an embedding for their query on-device, then pass it to Firestore's `findNearest`.
-4. **Answer Generation:** Pass the top 3-5 retrieved items to Gemini `gemini-1.5-flash` with the prompt: "Answer the user's query based ONLY on these saved items" to provide a 1-line answer above the results.
-
-### Testing Plan
-- Create test items with intentionally ambiguous text (e.g., "A photo of bread"). Search for "sourdough baking" and assert the item is returned in the top 3 results via vector proximity.
-- Assert that Firestore composite indexes for vector fields are successfully deploying and returning fast results under 300ms.
+This is the next five, ordered by value ÷ effort. Constraints unchanged: **Firebase Spark, no
+billing, no Cloud Functions**, everything client-side or a GitHub Actions cron.
 
 ---
 
-## 2. Resurfacing & "Remind Me Later"
-**Goal:** Prevent saves from dying in the feed by resurfacing them on anniversaries or user-scheduled snoozes.
+## 1. OCR on saved images — *built, unreleased*
 
-### Research Findings
-- **WorkManager:** `androidx.work:work-runtime-ktx` is the modern standard for guaranteed background execution on Android, requiring no backend.
-- **Reminders (Snooze):** For exact or near-exact reminders (e.g., "Saturday morning"), we will enqueue a `OneTimeWorkRequest` with an initial delay calculated from the current time to the target time.
-- **On This Day:** A `PeriodicWorkRequest` scheduled to run once daily (e.g., at 9 AM) that queries the local `ItemRepository` for items where `createdAt` matches the current day/month, but a previous year.
+**Goal:** Make the text *inside* screenshots searchable. Screenshots are the most-saved item type
+and right now every word in them is invisible to search — only Gemini's title/description/tags are.
 
-### Implementation Plan
-1. **Snooze UI:** Add a "Snooze" action to the `ItemDetailScreen` bottom bar with options like "Tomorrow", "Next Weekend", etc.
-2. **Worker Setup:** Implement a `NotificationWorker` that builds and fires a system notification using `NotificationManagerCompat`.
-3. **Deep Linking:** Ensure tapping the notification fires a deep link Intent that directly opens the `ItemDetailScreen` for the snoozed item.
+### Approach
+- **ML Kit Text Recognition v2**, Play-Services variant (`play-services-mlkit-text-recognition`) —
+  same distribution model as the subject-segmentation dep already shipped, so the model lives in
+  Play Services and adds ~nothing to the APK.
+- Runs inside `Classifier.classify()`'s existing `IMAGE` branch, on the bitmap it **already
+  decoded** for Gemini. No second decode, no new pass over the feed, one place all image saves
+  (camera, gallery, share-in) already route through.
+- Result stored as `Item.ocrText` and folded into the denormalized `searchText` that
+  `ItemRepository.finalize()` writes, so the existing substring search picks it up for free.
 
-### Testing Plan
-- Schedule a 1-minute test reminder and put the app in the background. Assert the notification fires and successfully deep-links into the item detail.
-- Mock the system clock to exactly 1 year after an item's creation date and manually trigger the daily PeriodicWorker to verify the "On This Day" logic.
+### Deliberate limits
+- Latin script only.
+- Capped at 2 000 chars — Firestore docs stay small and a wall of OCR noise doesn't drown the
+  real fields.
+- Not fed to the embedder: `embedText()` and the classify-time blob must stay identical, and raw
+  OCR noise degrades a 384-dim mean-pooled vector. Substring search is where OCR pays off.
+- **No backfill.** Existing images stay un-OCR'd; only new saves get it. A backfill would have to
+  re-download every image from Cloudinary. Add one modelled on `Embedder.backfill()` if it turns
+  out to matter.
 
----
-
-## 3. Smart Space Suggestions
-**Goal:** Remove organizational friction by proactively suggesting new Spaces based on clustered saves (e.g., "You have 8 recipe saves").
-
-### Research Findings
-- Items already possess AI-generated `tags` from the Gemini ingestion pipeline.
-- We can perform a lightweight greedy clustering or frequency analysis on these tags locally.
-
-### Implementation Plan
-1. **Frequency Analysis:** Inside `LibraryViewModel`, observe the user's total items. Extract all `tags` and build a frequency map.
-2. **Threshold Trigger:** If a specific tag (e.g., "Recipes", "Interior Design") appears in > 5 ungrouped items, emit a suggestion state.
-3. **Suggestion UI:** Render a prominent "Suggestion Card" at the top of the Home feed: "Create a 'Recipes' space for your 8 items?".
-4. **1-Tap Creation:** On tap, instantly create the Space in Firestore and batch-write all 8 item IDs into the `spaceItems` collection.
-
-### Testing Plan
-- Mock 6 items with the tag "DIY". Assert the UI emits exactly one suggestion card for "DIY".
-- Accept the suggestion and verify that the feed updates, the Space is created, and the items are successfully moved/tagged.
+### Testing
+Save a screenshot with distinctive text, wait for classification, search a word that appears only
+in the image — it should return that item.
 
 ---
 
-## 4. Share a Space as a Collage
-**Goal:** Render a visually stunning collage of a Space's covers into a Bitmap for native Android sharing.
+## 2. Per-space share targets — *built, unreleased*
 
-### Research Findings
-- **GraphicsLayer (Compose 1.7+):** Jetpack Compose now supports rendering composable trees directly to bitmaps using `GraphicsLayer` and `GraphicsLayer#toImageBitmap()`.
-- **Android Intent:** We can save the resulting Bitmap to the `cacheDir` and use `FileProvider` to yield a `content://` URI for `ACTION_SEND`.
+**Goal:** Share a photo from any app straight into a specific space. Today share-in always lands in
+the general feed, and filing it costs a further open → detail → add-to-space.
 
-### Implementation Plan
-1. **Collage Composable:** Build an off-screen `SpaceCollageLayout` that arranges the top 4-6 item hero images beautifully (e.g., in a staggered grid) with the Space title overlaid.
-2. **Render to Bitmap:** Wrap the layout in a `Modifier.drawWithCache` or manually record it into a `GraphicsLayer`, then suspend and await `toImageBitmap()`.
-3. **Share Intent:** Save the bitmap to `context.cacheDir`, generate a secure URI via `FileProvider`, and launch `Intent.createChooser()`.
+### Approach
+- `ShortcutManagerCompat.setDynamicShortcuts()` publishes the user's most recent spaces as
+  **long-lived, share-target shortcuts**; `res/xml/shortcuts.xml` declares the `<share-target>`
+  with the same mime types as the existing `ACTION_SEND` intent-filters.
+- Android delivers the chosen target's shortcut id as `Intent.EXTRA_SHORTCUT_ID` — the id *is* the
+  space id, so `MainActivity` just threads it through as `sharedSpaceId` alongside the existing
+  `sharedText` / `sharedImages`.
+- Ingest already takes a `spaceId` on every path (`ingestUri`, `createLink`, `createNote`), so the
+  save side needs no new plumbing.
 
-### Testing Plan
-- Trigger the share action on a Space with 5 items. Intercept the `ACTION_SEND` intent in an Espresso test and assert the payload is a valid image URI.
-- Verify the generated Bitmap dimensions and visual output locally.
+### Deliberate limits
+- Top 4 spaces by recency, no ranking model. Android's own usage ranking sorts them in the sheet.
+- No per-space icons (would need to render a cover thumbnail into an adaptive icon on a background
+  thread and republish on every cover change) — one shared shape mark instead.
+
+### Testing
+Share an image from Photos; the Android share sheet should offer "Thingy › <space>" rows, and
+picking one saves the image with that space's membership row already written.
 
 ---
 
-## 5. Per-Item Ambient Theming
-**Goal:** Tint the detail screen background and accents using the dominant colors of the item's hero image.
+## 3. Glance home-screen widget — *built, unreleased*
 
-### Research Findings
-- **androidx.palette:** The `androidx.palette:palette-ktx` library extracts prominent colors (Muted, Vibrant, Dominant) from bitmaps.
-- **Coil Integration:** We can hook into Coil's `onSuccess` listener, convert the `Drawable` to a `Bitmap`, and pass it to `Palette.from(bitmap).generate()`.
+**Goal:** Resurfacing that lives on the home screen instead of a notification you swipe away.
 
-### Implementation Plan
-1. **Dependency:** Add `implementation("androidx.palette:palette-ktx:1.0.0")`.
-2. **State Hoisting:** In `ItemDetailScreen`, add a `var dominantColor by remember { mutableStateOf<Color?>(null) }`.
-3. **Extraction:** Update the `AsyncImage` request builder in the `Hero` composable to extract the palette asynchronously on success.
-4. **Theme Application:** Animate the `Scaffold` background color to a severely darkened/desaturated version of the dominant color, and tint the text/icons using the vibrant counterpart to create a bespoke, immersive feel.
+### Approach
+- `androidx.glance:glance-appwidget` **1.2.0-rc01** — Compose-flavoured widget API, no XML
+  RemoteViews. Coexists fine with Compose 1.5-alpha on `compileSdk 37`.
+- One resizable widget, not two: today's resurfaced item (title + thumbnail, tap opens it) with a
+  **quick-capture** button in the header that deep-links straight into `CameraScreen`.
+- The widget reads **only** `SettingsRepository.widgetCard` — a flat DataStore snapshot
+  (`itemId`/`title`/`thumbPath`) that `ResurfaceWorker` writes when it makes today's pick, then
+  repaints via `ThingyWidget.refresh()`. A widget renders outside any signed-in foreground session,
+  so it must never open a Firestore listener; stale-but-present beats empty-and-correct.
+- Thumbnails are local files only (`Item.previewModel` → `File`) — no network path from a widget —
+  and are decoded size-capped at render time, since RemoteViews bitmaps cross a Binder transaction.
 
-### Testing Plan
-- Load an item with a strictly red image. Assert the calculated ambient color matches a red hue.
-- Ensure the extraction runs asynchronously on the IO dispatcher so it doesn't drop frames during the transition animation into the detail screen.
+### Fixed along the way
+`pickResurfaceTarget` (extracted from `ResurfaceWorker` to make it testable) treated a null
+`createdAt` as epoch, i.e. maximally old. `createdAt` is a `@ServerTimestamp`, so null means the
+write hasn't been acked yet — a just-saved item could surface as a "memory". Now excluded.
+
+---
+
+## 4. Export my data
+
+**Goal:** Complete the privacy story. Self-service deletion shipped; portability is the other half,
+and it's the one thing a data-hoarding app owes its users.
+
+### Approach
+- A `.zip` written straight to `Downloads` via `MediaStore` (no permission needed on API 29+):
+  `items.json` (every field of every owned item, spaces, memberships) plus the media files, taken
+  from `filesDir` where present and Cloudinary otherwise.
+- Run in a `WorkManager` job with a progress notification — this is minutes of work over a
+  connection, not something to hang a screen on.
+- Entry point: Settings → Account, directly above "Delete account".
+
+### Deliberate limits
+Media that only ever existed on another device and was never Cloudinary-synced can't be exported;
+say so in the UI rather than silently producing a partial archive.
+
+---
+
+## 5. Near-duplicate detection at ingest
+
+**Goal:** Stop the same receipt/screenshot accumulating five times.
+
+### Approach
+- Cosine over the embeddings **already computed** for smart search — `Embedder.cosine`, the same
+  call "More like this" uses. Zero new infrastructure.
+- At classify-finalize, compare the new item's vector against recent ready items; above a
+  threshold (tune from `Embedder.MIN_SCORE`, which is calibrated for *relatedness* — duplicates
+  need something much stricter, ~0.95) surface a dismissible "you already saved something like
+  this" affordance on the card.
+
+### Deliberate limits
+- Only works when smart search is enabled — that's what populates `embedding`. Silently inert
+  otherwise, which is the right failure mode.
+- Suggest, never auto-delete. Two photos of the same receipt may both be wanted.

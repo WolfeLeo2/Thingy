@@ -147,9 +147,9 @@ class ItemRepository(
         siteName: String? = null,
         heroImageUrl: String? = null,
         aspectRatio: Double? = null,
+        ocrText: String? = null,
     ) {
-        val searchText = listOf(title, description, tags.joinToString(" "), note.orEmpty())
-            .filter { it.isNotBlank() }.joinToString(" ").trim()
+        val searchText = buildSearchText(title, description, tags, note, ocrText)
         val update = mutableMapOf<String, Any?>(
             "title" to title,
             "description" to description,
@@ -158,6 +158,7 @@ class ItemRepository(
             "searchText" to searchText,
             "status" to ItemStatus.READY.wire,
         )
+        ocrText?.takeIf { it.isNotBlank() }?.let { update["ocrText"] = it }
         content?.let { update["content"] = it }
         siteName?.let { update["siteName"] = it }
         heroImageUrl?.let { update["heroImageUrl"] = it }
@@ -258,3 +259,19 @@ class ItemRepository(
         items.document(id).delete().await()
     }
 }
+
+/**
+ * The denormalized blob the substring search filters on.
+ *
+ * ocrText is folded in (so words inside a screenshot are findable) but deliberately NOT into
+ * [embedText] — that blob must stay identical to the classify-time one, and raw OCR noise degrades
+ * the vector more than it helps.
+ */
+internal fun buildSearchText(
+    title: String,
+    description: String,
+    tags: List<String>,
+    note: String?,
+    ocrText: String?,
+): String = listOf(title, description, tags.joinToString(" "), note.orEmpty(), ocrText.orEmpty())
+    .filter { it.isNotBlank() }.joinToString(" ").trim()

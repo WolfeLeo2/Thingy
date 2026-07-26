@@ -12,6 +12,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** Flat snapshot of the item the home-screen widget shows — see [SettingsRepository.widgetCard]. */
+data class WidgetCard(val itemId: String, val title: String, val thumbPath: String?)
+
 enum class ColorSource { DYNAMIC, AMBER }
 enum class SpacesLayout { GRID, SHELF }
 
@@ -25,6 +28,9 @@ private val DISMISSED_SUGGESTIONS = stringSetPreferencesKey("dismissed_space_sug
 private val RESURFACED_ITEM_ID = stringPreferencesKey("resurfacing_item_id")
 private val DISMISSED_RESURFACE_ID = stringPreferencesKey("dismissed_resurface_id")
 private val SNOOZED_ITEMS = stringPreferencesKey("snoozed_items_map")
+private val WIDGET_ITEM_ID = stringPreferencesKey("widget_item_id")
+private val WIDGET_TITLE = stringPreferencesKey("widget_title")
+private val WIDGET_THUMB = stringPreferencesKey("widget_thumb_path")
 
 class SettingsRepository(private val context: Context) {
     val colorSource: Flow<ColorSource> = context.dataStore.data.map { prefs ->
@@ -89,6 +95,24 @@ class SettingsRepository(private val context: Context) {
     suspend fun setResurfacedItemId(id: String) {
         val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
         context.dataStore.edit { it[RESURFACED_ITEM_ID] = "$id|$today" }
+    }
+
+    /**
+     * Everything the home-screen widget renders, cached flat. A widget process must not open a
+     * Firestore listener (it isn't a foreground app and there's no auth guarantee), so the
+     * resurfacing worker — which already has the item in hand — writes this snapshot for it.
+     */
+    val widgetCard: Flow<WidgetCard?> = context.dataStore.data.map { prefs ->
+        val id = prefs[WIDGET_ITEM_ID] ?: return@map null
+        WidgetCard(id, prefs[WIDGET_TITLE].orEmpty(), prefs[WIDGET_THUMB])
+    }
+
+    suspend fun setWidgetCard(itemId: String, title: String, thumbPath: String?) {
+        context.dataStore.edit { prefs ->
+            prefs[WIDGET_ITEM_ID] = itemId
+            prefs[WIDGET_TITLE] = title
+            if (thumbPath == null) prefs.remove(WIDGET_THUMB) else prefs[WIDGET_THUMB] = thumbPath
+        }
     }
 
     suspend fun dismissResurfacing() {

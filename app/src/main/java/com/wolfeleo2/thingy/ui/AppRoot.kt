@@ -46,6 +46,7 @@ import com.wolfeleo2.thingy.data.ItemRepository
 import com.wolfeleo2.thingy.data.OfflineImageSyncer
 import com.wolfeleo2.thingy.data.SettingsRepository
 import com.wolfeleo2.thingy.data.SpaceRepository
+import com.wolfeleo2.thingy.data.SpaceShortcuts
 import com.wolfeleo2.thingy.data.VideoIngestor
 import com.wolfeleo2.thingy.nav.Camera
 import com.wolfeleo2.thingy.nav.Home
@@ -81,6 +82,13 @@ fun AppRoot(
     onOpenItemConsumed: () -> Unit = {},
     joinCode: String? = null,
     onJoinCodeConsumed: () -> Unit = {},
+    /** Space chosen in the share sheet (Direct Share target) — shared content saves into it. */
+    sharedSpaceId: String? = null,
+    openSpaceId: String? = null,
+    onOpenSpaceConsumed: () -> Unit = {},
+    /** Quick-capture button on the home-screen widget. */
+    openCamera: Boolean = false,
+    onOpenCameraConsumed: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val appContext = LocalContext.current.applicationContext
@@ -216,13 +224,31 @@ fun AppRoot(
         }
     }
 
+    // Quick-capture from the home-screen widget.
+    LaunchedEffect(openCamera, user?.uid, onboarded) {
+        if (openCamera && user != null && onboarded == true) {
+            backStack.add(Camera())
+            onOpenCameraConsumed()
+        }
+    }
+
+    // Space shortcut tapped from the launcher's long-press menu.
+    LaunchedEffect(openSpaceId, user?.uid, onboarded) {
+        val spaceId = openSpaceId
+        if (spaceId != null && user != null && onboarded == true) {
+            backStack.add(SpaceDetail(spaceId))
+            onOpenSpaceConsumed()
+        }
+    }
+
     // Share-in: turn shared text into a link (if a URL) or a note, once the app is usable.
+    // sharedSpaceId is set when the user picked a per-space Direct Share target; null = general feed.
     LaunchedEffect(sharedText, user?.uid, onboarded) {
         val text = sharedText
         if (text != null && user != null && onboarded == true) {
             runCatching {
-                if (android.util.Patterns.WEB_URL.matcher(text).matches()) itemRepository.createLink(text)
-                else itemRepository.createNote(text)
+                if (android.util.Patterns.WEB_URL.matcher(text).matches()) itemRepository.createLink(text, sharedSpaceId)
+                else itemRepository.createNote(text, sharedSpaceId)
             }
             onSharedConsumed()
         }
@@ -234,14 +260,24 @@ fun AppRoot(
             runCatching {
                 sharedImages.forEach { uri ->
                     if (cr.getType(uri)?.startsWith("video/") == true) {
-                        videoIngestor.ingestUri(uri)
+                        videoIngestor.ingestUri(uri, spaceId = sharedSpaceId)
                     } else {
-                        ingestor.ingestUri(uri, asSticker = false)
+                        ingestor.ingestUri(uri, asSticker = false, spaceId = sharedSpaceId)
                     }
                 }
             }
             onImagesConsumed()
         }
+    }
+
+    // Keep the share sheet's per-space targets in step with the user's spaces.
+    val spacesForShortcuts by library.spaces.collectAsStateWithLifecycle()
+    // Keyed on what a shortcut actually shows, not list identity — otherwise every Firestore
+    // snapshot republishes and hits the launcher's setDynamicShortcuts rate limit for nothing.
+    val shortcutKey = spacesForShortcuts?.take(4)?.joinToString { "${it.id}:${it.name}" }
+    LaunchedEffect(user?.uid, shortcutKey) {
+        if (user == null) SpaceShortcuts.clear(appContext)
+        else spacesForShortcuts?.let { SpaceShortcuts.publish(appContext, it) }
     }
 
     val snackbar = remember { SnackbarHostState() }
