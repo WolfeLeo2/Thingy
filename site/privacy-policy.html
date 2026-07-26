@@ -5,220 +5,297 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Thingy — Privacy Policy</title>
 <meta name="description" content="Privacy policy for Thingy, a save-it-for-later app." />
+<meta name="theme-color" content="#fbf7ef" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#17130d" media="(prefers-color-scheme: dark)" />
 <style>
   :root {
     --bg: #fbf7ef;
-    --ink: #221b12;
+    --ink: #1f1810;
     --muted: #6e6252;
     --accent: #a8641a;
-    --accent-ink: #6e4210;
-    --accent-soft: #f0dfc0;
-    --card: #f4ecdb;
-    --rule: #e6dcc7;
+    --accent-ink: #7a4610;
+    --accent-soft: #f7e6c8;
+    --surface: #fffdf8;
+    --surface-alt: #f4ecdb;
+    --rule: #e8dec9;
     --danger: #9a3324;
-    --danger-soft: #f3ded8;
-    --radius: 10px;
+    --danger-soft: #fbe6df;
+    --shadow: 0 1px 2px rgba(60, 40, 12, .06), 0 12px 32px -20px rgba(60, 40, 12, .45);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #1a1610;
-      --ink: #f1e8d6;
-      --muted: #a89a82;
-      --accent: #e2a34a;
+      --bg: #17130d;
+      --ink: #f3ead8;
+      --muted: #ab9d85;
+      --accent: #e9ad57;
       --accent-ink: #f6d9a4;
-      --accent-soft: #3a2c16;
-      --card: #241d13;
-      --rule: #362b1c;
-      --danger: #e08a76;
-      --danger-soft: #3a231d;
+      --accent-soft: #3c2d17;
+      --surface: #221b12;
+      --surface-alt: #2b2217;
+      --rule: #382d1d;
+      --danger: #e79a86;
+      --danger-soft: #3d231c;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 12px 32px -20px rgba(0, 0, 0, .9);
     }
-  }
-  :root[data-theme="dark"] {
-    --bg: #1a1610; --ink: #f1e8d6; --muted: #a89a82; --accent: #e2a34a;
-    --accent-ink: #f6d9a4; --accent-soft: #3a2c16; --card: #241d13; --rule: #362b1c;
-    --danger: #e08a76; --danger-soft: #3a231d;
-  }
-  :root[data-theme="light"] {
-    --bg: #fbf7ef; --ink: #221b12; --muted: #6e6252; --accent: #a8641a;
-    --accent-ink: #6e4210; --accent-soft: #f0dfc0; --card: #f4ecdb; --rule: #e6dcc7;
-    --danger: #9a3324; --danger-soft: #f3ded8;
   }
 
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
-  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 
   body {
     margin: 0;
     background: var(--bg);
     color: var(--ink);
-    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     font-size: 17px;
     line-height: 1.65;
     -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
   }
 
-  .wrap {
-    max-width: 680px;
-    margin: 0 auto;
-    padding: 64px 24px 96px;
+  /* Reading-progress bar. CSS-only; simply absent where unsupported. */
+  .progress {
+    position: fixed; inset: 0 0 auto 0; height: 3px; z-index: 10;
+    background: var(--accent); transform-origin: 0 50%; transform: scaleX(0);
+    animation: grow linear both; animation-timeline: scroll(root block);
   }
+  @keyframes grow { to { transform: scaleX(1); } }
+
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 20px 96px; }
+
+  /* ---------- hero ---------- */
+
+  .hero {
+    position: relative;
+    padding: 84px 0 44px;
+    text-align: center;
+  }
+  .hero::before {
+    content: "";
+    position: absolute; z-index: -1;
+    left: 50%; top: -180px; translate: -50% 0;
+    width: 130vw; height: 520px;
+    background:
+      radial-gradient(46% 60% at 50% 46%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 70%),
+      radial-gradient(38% 50% at 22% 30%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 72%),
+      radial-gradient(40% 52% at 82% 34%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 72%);
+    filter: blur(6px);
+  }
+
+  .mark { width: 62px; height: 62px; color: var(--accent); display: block; margin: 0 auto 22px; }
+  .mark-inner { fill: currentColor; }
 
   .eyebrow {
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    font-size: 12.5px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
+    display: inline-block;
+    font-size: 12px; font-weight: 650;
+    letter-spacing: .16em; text-transform: uppercase;
     color: var(--accent-ink);
-    margin: 0 0 10px;
+    background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
+    border-radius: 999px; padding: 6px 15px; margin: 0 0 18px;
   }
 
   h1 {
-    font-family: ui-serif, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
-    font-size: 2.5rem;
-    font-weight: 700;
-    line-height: 1.1;
-    margin: 0 0 6px;
-    text-wrap: balance;
+    font-size: clamp(2.6rem, 9vw, 4rem);
+    font-weight: 800; letter-spacing: -.035em; line-height: .98;
+    margin: 0 0 14px; text-wrap: balance;
   }
 
-  .meta {
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    font-size: 13px;
-    color: var(--muted);
-    margin: 0 0 40px;
+  .meta { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 0; }
+  .meta span, .meta a {
+    font-size: 13.5px; color: var(--muted); text-decoration: none;
+    background: var(--surface); border: 1px solid var(--rule);
+    border-radius: 999px; padding: 5px 14px;
   }
+  .meta a:hover { color: var(--accent-ink); border-color: var(--accent); }
 
-  .tldr {
-    background: var(--card);
-    border: 1px solid var(--rule);
-    border-radius: var(--radius);
-    padding: 22px 24px;
-    margin: 0 0 32px;
-  }
-  .tldr h2 {
-    font-family: ui-serif, "Iowan Old Style", Georgia, serif;
-    font-size: 1.05rem;
-    font-weight: 700;
-    margin: 0 0 12px;
-  }
-  .tldr ul {
-    margin: 0;
-    padding-left: 1.15em;
-  }
-  .tldr li { margin: 0 0 8px; }
-  .tldr li:last-child { margin-bottom: 0; }
-  .tldr strong { color: var(--accent-ink); font-weight: 700; }
+  /* ---------- in short ---------- */
 
-  nav.toc {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 18px;
-    margin: 0 0 48px;
-    padding: 16px 0;
-    border-top: 1px solid var(--rule);
-    border-bottom: 1px solid var(--rule);
+  .short { margin: 44px 0 40px; }
+  .short h2 {
+    font-size: 12px; font-weight: 650; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 16px; text-align: center;
   }
+  .cards { display: grid; gap: 12px; grid-template-columns: repeat(2, 1fr); }
+  @media (max-width: 620px) { .cards { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-radius: 24px; padding: 20px 20px 22px;
+    box-shadow: var(--shadow);
+    display: flex; flex-direction: column; gap: 12px;
+    transition: transform .18s ease, border-color .18s ease;
+  }
+  .card:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--accent) 45%, var(--rule)); }
+  .card .ic {
+    width: 38px; height: 38px; flex: none;
+    display: grid; place-items: center;
+    border-radius: 13px;
+    background: var(--accent-soft); color: var(--accent-ink);
+  }
+  .card .ic svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+  .card p { margin: 0; font-size: 15.5px; line-height: 1.55; }
+  .card strong { color: var(--accent-ink); font-weight: 700; }
+  .card.wide { grid-column: 1 / -1; background: var(--accent-soft); border-color: transparent; }
+  .card.wide .ic { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+
+  /* ---------- toc ---------- */
+
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 0 0 56px; }
   nav.toc a {
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    font-size: 12.5px;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--muted);
-    text-decoration: none;
+    font-size: 13.5px; color: var(--muted); text-decoration: none;
+    background: var(--surface-alt); border-radius: 999px; padding: 7px 15px;
+    transition: background .15s ease, color .15s ease;
   }
-  nav.toc a:hover, nav.toc a:focus-visible { color: var(--accent-ink); }
+  nav.toc a:hover, nav.toc a:focus-visible { background: var(--accent-soft); color: var(--accent-ink); }
 
-  section { margin: 0 0 40px; scroll-margin-top: 24px; }
+  /* ---------- sections ---------- */
+
+  section { margin: 0 0 20px; scroll-margin-top: 20px; }
+  section > .body {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-radius: 28px; padding: 30px 32px;
+    box-shadow: var(--shadow);
+  }
+  @media (max-width: 620px) { section > .body { padding: 24px 22px; border-radius: 24px; } }
+
   section h2 {
-    font-family: ui-serif, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
-    font-size: 1.4rem;
-    font-weight: 700;
-    margin: 0 0 14px;
-    padding-top: 28px;
-    border-top: 1px solid var(--rule);
-    text-wrap: balance;
+    display: flex; align-items: baseline; gap: 12px;
+    font-size: 1.45rem; font-weight: 750; letter-spacing: -.02em;
+    margin: 0 0 16px; text-wrap: balance;
   }
-  section:first-of-type h2 { border-top: none; padding-top: 0; }
-  section h3 {
-    font-size: 0.95rem;
-    font-weight: 700;
-    margin: 20px 0 6px;
+  section h2 .n {
+    font-size: 12.5px; font-weight: 650; letter-spacing: .08em;
+    color: var(--accent); font-variant-numeric: tabular-nums;
   }
+  section h3 { font-size: .95rem; font-weight: 700; margin: 22px 0 6px; color: var(--accent-ink); }
   p { margin: 0 0 14px; }
   p:last-child { margin-bottom: 0; }
   ul, ol { padding-left: 1.2em; margin: 0 0 14px; }
   li { margin-bottom: 6px; }
-  a { color: var(--accent-ink); }
-  code {
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    font-size: 0.88em;
-    background: var(--card);
-    padding: 0.1em 0.4em;
-    border-radius: 4px;
-  }
+  a { color: var(--accent-ink); text-underline-offset: 3px; }
 
-  .table-wrap { overflow-x: auto; margin: 0 0 14px; }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 15px;
-  }
-  th, td {
-    text-align: left;
-    padding: 10px 14px 10px 0;
-    border-bottom: 1px solid var(--rule);
-    vertical-align: top;
-  }
-  th {
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    font-size: 11.5px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--muted);
-    font-weight: 600;
-  }
-  td:last-child, th:last-child { padding-right: 0; }
+  /* ---------- table ---------- */
 
-  .callout {
-    background: var(--accent-soft);
-    border-radius: var(--radius);
-    padding: 20px 22px;
-    margin: 16px 0;
+  .table-wrap {
+    overflow-x: auto; margin: 4px 0 14px;
+    border: 1px solid var(--rule); border-radius: 18px;
   }
-  .callout h3 { margin-top: 0; }
-  .callout.danger { background: var(--danger-soft); }
-  .callout.danger h3 { color: var(--danger); }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th, td { text-align: left; padding: 12px 16px; vertical-align: top; }
+  thead th {
+    font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); font-weight: 650;
+    background: var(--surface-alt);
+  }
+  tbody tr + tr td { border-top: 1px solid var(--rule); }
+  tbody td:first-child { font-weight: 650; white-space: nowrap; }
+
+  /* ---------- 30-day timeline ---------- */
+
+  .steps { list-style: none; margin: 4px 0 0; padding: 0; }
+  .steps li {
+    position: relative; padding: 0 0 22px 40px; margin: 0;
+  }
+  .steps li:last-child { padding-bottom: 0; }
+  .steps li::before {
+    content: counter(step); counter-increment: step;
+    position: absolute; left: 0; top: 1px;
+    width: 26px; height: 26px; border-radius: 50%;
+    display: grid; place-items: center;
+    font-size: 13px; font-weight: 700;
+    background: var(--danger); color: var(--bg);
+  }
+  .steps li:not(:last-child)::after {
+    content: ""; position: absolute; left: 12.5px; top: 30px; bottom: 4px;
+    width: 1px; background: color-mix(in srgb, var(--danger) 40%, transparent);
+  }
+  .steps { counter-reset: step; }
+
+  .callout { background: var(--danger-soft); border-radius: 22px; padding: 24px 26px; margin: 18px 0; }
+  .callout h3 { margin: 0 0 14px; color: var(--danger); }
+
+  /* ---------- footer ---------- */
 
   footer {
-    margin-top: 56px;
-    padding-top: 24px;
+    margin-top: 48px; padding-top: 32px; text-align: center;
     border-top: 1px solid var(--rule);
-    font-size: 14px;
-    color: var(--muted);
+    font-size: 14px; color: var(--muted);
   }
+  footer .mark { width: 30px; height: 30px; margin-bottom: 14px; opacity: .7; }
   footer a { color: var(--muted); }
 
   ::selection { background: var(--accent-soft); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+
+  /* ---------- entrance motion ---------- */
+
+  .reveal { opacity: 0; transform: translateY(14px); transition: opacity .5s ease, transform .5s ease; }
+  .reveal.in { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .reveal { opacity: 1; transform: none; transition: none; }
+    .card:hover { transform: none; }
+    .progress { display: none; }
+  }
 </style>
 </head>
 <body>
+<div class="progress" aria-hidden="true"></div>
+
+<!-- Scalloped "sunny" mark, same shape language as the app's wordmark. -->
+<svg width="0" height="0" aria-hidden="true" style="position:absolute">
+  <symbol id="sunny" viewBox="0 0 64 64">
+    <g class="mark-inner">
+      <circle cx="32" cy="32" r="19"/>
+      <circle cx="50" cy="32" r="7"/><circle cx="46.56" cy="42.58" r="7"/>
+      <circle cx="37.56" cy="49.12" r="7"/><circle cx="26.44" cy="49.12" r="7"/>
+      <circle cx="17.44" cy="42.58" r="7"/><circle cx="14" cy="32" r="7"/>
+      <circle cx="17.44" cy="21.42" r="7"/><circle cx="26.44" cy="14.88" r="7"/>
+      <circle cx="37.56" cy="14.88" r="7"/><circle cx="46.56" cy="21.42" r="7"/>
+    </g>
+  </symbol>
+</svg>
+
 <div class="wrap">
 
-  <p class="eyebrow">Privacy Policy</p>
-  <h1>Thingy</h1>
-  <p class="meta">Effective 26 July 2026 &nbsp;·&nbsp; contact: <a href="mailto:muneneboizkaruga@gmail.com">muneneboizkaruga@gmail.com</a></p>
+  <header class="hero">
+    <svg class="mark" aria-hidden="true"><use href="#sunny"/></svg>
+    <p class="eyebrow">Privacy Policy</p>
+    <h1>Thingy</h1>
+    <p class="meta">
+      <span>Effective 26 July 2026</span>
+      <a href="mailto:muneneboizkaruga@gmail.com">muneneboizkaruga@gmail.com</a>
+    </p>
+  </header>
 
-  <div class="tldr">
+  <div class="short">
     <h2>In short</h2>
-    <ul>
-      <li>Thingy stores what you save (photos, videos, notes, links) and uses <strong>Google Gemini</strong> to tag and organize it automatically.</li>
-      <li>Photos keep their location if the photo has it — that's what powers the map.</li>
-      <li>Your media is hosted on <strong>Cloudinary</strong>, a third-party CDN, so it works across your devices.</li>
-      <li>If you use "Find shopping links," a short text query is sent to <strong>SerpAPI</strong>.</li>
-      <li><strong>No ads, no analytics, nothing sold to anyone.</strong></li>
-      <li>You can delete your account in Settings — full erase after 30 days, undo any time before that.</li>
-    </ul>
+    <div class="cards">
+      <div class="card reveal">
+        <span class="ic"><svg viewBox="0 0 24 24"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5z"/><path d="m5 16 4-4 3.5 3.5L16 12l3 3"/><circle cx="14.5" cy="8.5" r="1.5"/></svg></span>
+        <p>Thingy stores what you save (photos, videos, notes, links) and uses <strong>Google Gemini</strong> to tag and organize it automatically.</p>
+      </div>
+      <div class="card reveal">
+        <span class="ic"><svg viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11"/><circle cx="12" cy="10" r="2.6"/></svg></span>
+        <p>Photos keep their location if the photo has it — that's what powers the map.</p>
+      </div>
+      <div class="card reveal">
+        <span class="ic"><svg viewBox="0 0 24 24"><path d="M7 18h10a4 4 0 0 0 .4-7.98A6 6 0 0 0 6.1 9.2 3.9 3.9 0 0 0 7 18Z"/></svg></span>
+        <p>Your media is hosted on <strong>Cloudinary</strong>, a third-party CDN, so it works across your devices.</p>
+      </div>
+      <div class="card reveal">
+        <span class="ic"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-3.6-3.6"/></svg></span>
+        <p>If you use "Find shopping links," a short text query is sent to <strong>SerpAPI</strong>.</p>
+      </div>
+      <div class="card reveal">
+        <span class="ic"><svg viewBox="0 0 24 24"><path d="M12 3.5 5 6.2v5.4c0 4.2 2.9 7.6 7 8.9 4.1-1.3 7-4.7 7-8.9V6.2z"/><path d="m9.2 12 2 2 3.6-3.8"/></svg></span>
+        <p><strong>No ads, no analytics, nothing sold to anyone.</strong></p>
+      </div>
+      <div class="card wide reveal">
+        <span class="ic"><svg viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 1 2.6 6.1"/><path d="M3.5 19v-5h5"/></svg></span>
+        <p>You can delete your account in Settings — full erase after 30 days, undo any time before that.</p>
+      </div>
+    </div>
   </div>
 
   <nav class="toc">
@@ -233,8 +310,8 @@
     <a href="#contact">Contact</a>
   </nav>
 
-  <section id="collect">
-    <h2>What we collect</h2>
+  <section id="collect" class="reveal"><div class="body">
+    <h2><span class="n">01</span>What we collect</h2>
     <p>Thingy is a personal save-it-for-later app. Here's what it stores, and why.</p>
 
     <h3>Account</h3>
@@ -245,10 +322,10 @@
 
     <h3>On-device only, never sent anywhere</h3>
     <p>If you turn on Smart Search, a small AI model is downloaded and runs entirely on your phone. It reads what you've saved to make search understand meaning, not just keywords — none of that ever leaves your device.</p>
-  </section>
+  </div></section>
 
-  <section id="third-parties">
-    <h2>Who else touches your data</h2>
+  <section id="third-parties" class="reveal"><div class="body">
+    <h2><span class="n">02</span>Who else touches your data</h2>
     <p>Thingy is built on a few outside services. Here's exactly what each one sees and why it's there.</p>
     <div class="table-wrap">
       <table>
@@ -280,56 +357,66 @@
       </table>
     </div>
     <p>None of these companies are paid to advertise to you through Thingy, and Thingy doesn't sell or rent your data to anyone, for any reason.</p>
-  </section>
+  </div></section>
 
-  <section id="sharing">
-    <h2>Shared spaces</h2>
+  <section id="sharing" class="reveal"><div class="body">
+    <h2><span class="n">03</span>Shared spaces</h2>
     <p>Thingy lets you share a "space" with friends by invite code. Anything you add to a shared space becomes visible to everyone else in that space — that's the point of sharing it. Leaving a space (or deleting your account) removes your access and revokes anything you'd shared into it.</p>
-  </section>
+  </div></section>
 
-  <section id="retention">
-    <h2>How long we keep things</h2>
+  <section id="retention" class="reveal"><div class="body">
+    <h2><span class="n">04</span>How long we keep things</h2>
     <p>As long as your account exists, your data exists — there's no automatic expiry on an active account. If you delete an item or leave a space, that change happens immediately.</p>
-  </section>
+  </div></section>
 
-  <section id="deletion">
-    <h2>Deleting your account</h2>
+  <section id="deletion" class="reveal"><div class="body">
+    <h2><span class="n">05</span>Deleting your account</h2>
     <p>Settings → Delete account. Here's exactly what happens:</p>
-    <div class="callout danger">
+    <div class="callout">
       <h3>The 30-day window</h3>
-      <ol>
+      <ol class="steps">
         <li>You're signed out immediately.</li>
         <li>For 30 days, your data is untouched — sign back in any time in that window and you'll be offered the choice to cancel and keep your account exactly as it was.</li>
         <li>After 30 days, everything is permanently deleted: your saved items, shared-space memberships, media on Cloudinary, and your account itself. This can't be undone once it runs.</li>
       </ol>
     </div>
     <p>If you owned a space shared with friends, that space is deleted along with your account rather than handed to someone else — your friends keep whatever they'd saved outside of it, but the shared space itself goes away.</p>
-  </section>
+  </div></section>
 
-  <section id="security">
-    <h2>Security</h2>
+  <section id="security" class="reveal"><div class="body">
+    <h2><span class="n">06</span>Security</h2>
     <p>Sign-in goes through Google, not a password we manage. Access to your saved items and shared spaces is enforced by Firebase's security rules on every request, not just checked in the app.</p>
-  </section>
+  </div></section>
 
-  <section id="children">
-    <h2>Children</h2>
+  <section id="children" class="reveal"><div class="body">
+    <h2><span class="n">07</span>Children</h2>
     <p>Thingy isn't directed at children under 13, and we don't knowingly collect data from anyone under that age.</p>
-  </section>
+  </div></section>
 
-  <section id="changes">
-    <h2>Changes to this policy</h2>
+  <section id="changes" class="reveal"><div class="body">
+    <h2><span class="n">08</span>Changes to this policy</h2>
     <p>If this policy changes in a way that matters, the "Effective" date at the top will change and, where reasonable, we'll let you know in the app.</p>
-  </section>
+  </div></section>
 
-  <section id="contact">
-    <h2>Contact</h2>
+  <section id="contact" class="reveal"><div class="body">
+    <h2><span class="n">09</span>Contact</h2>
     <p>Questions, deletion requests, or anything else: <a href="mailto:muneneboizkaruga@gmail.com">muneneboizkaruga@gmail.com</a>.</p>
-  </section>
+  </div></section>
 
   <footer>
-    Thingy is a personal project, built and run by one person for a small group of friends.
+    <svg class="mark" aria-hidden="true"><use href="#sunny"/></svg>
+    <p>Thingy is a personal project, built and run by one person for a small group of friends.</p>
   </footer>
 
 </div>
+
+<script>
+  // Reveal-on-scroll. No-JS or reduced-motion users get everything visible via CSS.
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+  }, { rootMargin: '0px 0px -8% 0px' });
+  document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+</script>
+<noscript><style>.reveal { opacity: 1; transform: none; }</style></noscript>
 </body>
 </html>
