@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wolfeleo2.thingy.data.Classifier
 import com.wolfeleo2.thingy.data.Item
+import com.wolfeleo2.thingy.data.displayTitle
 import com.wolfeleo2.thingy.data.ItemRepository
 import com.wolfeleo2.thingy.data.SettingsRepository
 import com.wolfeleo2.thingy.data.SpaceRepository
@@ -62,6 +63,7 @@ internal fun HomeFeed(
     var snoozeTarget by remember { mutableStateOf<Item?>(null) }
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    val notify = LocalNotify.current
 
     LaunchedEffect(Unit) {
         ReminderManager.scheduleDailyResurface(context)
@@ -123,7 +125,7 @@ internal fun HomeFeed(
                             animatedVisibilityScope = animatedVisibilityScope,
                             modifier = Modifier.animateItem(),
                             onAddToSpace = { onAddToSpace(item.id) },
-                            onDelete = { scope.launch { itemRepository.delete(item.id) } },
+                            onDelete = { scope.launch { itemRepository.delete(item.id); notify("${item.displayTitle()} deleted") } },
                             selectionActive = selectedIds.isNotEmpty(),
                             selected = item.id in selectedIds,
                             onToggleSelect = { onToggleSelect(item.id) },

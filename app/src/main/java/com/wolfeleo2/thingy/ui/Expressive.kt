@@ -63,6 +63,8 @@ import androidx.graphics.shapes.Morph
 import androidx.graphics.shapes.RoundedPolygon
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wolfeleo2.thingy.data.Classifier
+import com.wolfeleo2.thingy.data.ItemRepository
+import com.wolfeleo2.thingy.data.displayTitle
 import com.wolfeleo2.thingy.data.SpaceRepository
 import kotlinx.coroutines.launch
 
@@ -197,7 +199,7 @@ private fun NewSpaceRow(onCreate: (name: String) -> Unit) {
 fun AddManyToSpaceDialog(
     count: Int,
     spaceRepository: SpaceRepository,
-    onPick: (spaceId: String) -> Unit,
+    onPick: (spaceId: String, spaceName: String) -> Unit,
     onCreateSpace: (name: String) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -212,7 +214,7 @@ fun AddManyToSpaceDialog(
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 spaces.forEach { space ->
                     Row(
-                        Modifier.fillMaxWidth().clickable { onPick(space.id) }.padding(vertical = 12.dp),
+                        Modifier.fillMaxWidth().clickable { onPick(space.id, space.name) }.padding(vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(space.name, modifier = Modifier.weight(1f))
@@ -235,11 +237,14 @@ fun AddManyToSpaceDialog(
 fun ManageSpacesDialog(
     itemId: String,
     spaceRepository: SpaceRepository,
+    itemRepository: ItemRepository,
     classifier: Classifier,
     onDismiss: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val notify = LocalNotify.current
     val spaces by remember { spaceRepository.spaces() }.collectAsStateWithLifecycle(emptyList())
+    val item by remember(itemId) { itemRepository.item(itemId) }.collectAsStateWithLifecycle(null)
     val memberships by remember(itemId) { spaceRepository.membershipsForItem(itemId) }.collectAsStateWithLifecycle(emptyList())
     val live = memberships.filter { it.status != com.wolfeleo2.thingy.data.SpaceItemStatus.DISMISSED.wire }
     val bySpace = live.associateBy { it.spaceId }
@@ -254,8 +259,15 @@ fun ManageSpacesDialog(
                     Row(
                         Modifier.fillMaxWidth().clickable {
                             scope.launch {
-                                if (inSpace) bySpace[space.id]?.let { spaceRepository.removeMembership(it.id) }
-                                else { spaceRepository.addItemToSpace(itemId, space.id); classifier.steerItemForSpace(itemId, space.id) }
+                                val name = item?.displayTitle() ?: "Thingy"
+                                if (inSpace) {
+                                    bySpace[space.id]?.let { spaceRepository.removeMembership(it.id) }
+                                    notify("$name removed from ${space.name}")
+                                } else {
+                                    spaceRepository.addItemToSpace(itemId, space.id)
+                                    notify("$name added to ${space.name}")
+                                    classifier.steerItemForSpace(itemId, space.id)
+                                }
                             }
                         }.padding(vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -269,10 +281,11 @@ fun ManageSpacesDialog(
                     }
                 }
                 // Safe on this dialog's own scope — it stays composed after a tap, unlike the multi-select one.
-                NewSpaceRow(onCreate = { name ->
+                NewSpaceRow(onCreate = { spaceName ->
                     scope.launch {
-                        val id = spaceRepository.createSpace(name)
+                        val id = spaceRepository.createSpace(spaceName)
                         spaceRepository.addItemToSpace(itemId, id)
+                        notify("${item?.displayTitle() ?: "Thingy"} added to $spaceName")
                         classifier.steerItemForSpace(itemId, id)
                     }
                 })

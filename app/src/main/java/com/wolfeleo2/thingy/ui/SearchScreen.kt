@@ -148,6 +148,7 @@ fun SearchScreen(
             ManageSpacesDialog(
                 itemId = id,
                 spaceRepository = spaceRepository,
+                itemRepository = itemRepository,
                 classifier = classifier,
                 onDismiss = { addingToSpaceId = null }
             )

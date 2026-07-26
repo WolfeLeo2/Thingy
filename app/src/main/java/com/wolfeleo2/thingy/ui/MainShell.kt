@@ -107,6 +107,7 @@ fun MainShell(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val notify = LocalNotify.current
     var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
     var showAdd by remember { mutableStateOf(false) }
     var sharingSpace by remember { mutableStateOf<com.wolfeleo2.thingy.data.Space?>(null) }
@@ -250,6 +251,7 @@ fun MainShell(
             ManageSpacesDialog(
                 itemId = id,
                 spaceRepository = spaceRepository,
+                itemRepository = itemRepository,
                 classifier = classifier,
                 onDismiss = { addingToSpaceId = null }
             )
@@ -262,21 +264,22 @@ fun MainShell(
         if (addingSelectionToSpace) {
             // The writes run on MainShell's scope, not the dialog's: dismissing the dialog tears down a
             // rememberCoroutineScope inside it, which cancelled the Firestore batch before it committed.
-            val fileSelection: (suspend () -> String) -> Unit = { resolveSpaceId ->
+            val fileSelection: (String, suspend () -> String) -> Unit = { spaceName, resolveSpaceId ->
                 val ids = selectedIds.toList()
                 addingSelectionToSpace = false
                 selectedIds.clear()
                 scope.launch {
                     val spaceId = resolveSpaceId()
                     spaceRepository.addItemsToSpace(ids, spaceId)
+                    notify("${thingies(ids.size)} added to $spaceName")
                     ids.forEach { classifier.steerItemForSpace(it, spaceId) }
                 }
             }
             AddManyToSpaceDialog(
                 count = selectedIds.size,
                 spaceRepository = spaceRepository,
-                onPick = { spaceId -> fileSelection { spaceId } },
-                onCreateSpace = { name -> fileSelection { spaceRepository.createSpace(name) } },
+                onPick = { spaceId, spaceName -> fileSelection(spaceName) { spaceId } },
+                onCreateSpace = { name -> fileSelection(name) { spaceRepository.createSpace(name) } },
                 onDismiss = { addingSelectionToSpace = false },
             )
         }
@@ -292,7 +295,7 @@ fun MainShell(
                         val ids = selectedIds.toList()
                         confirmBulkDelete = false
                         selectedIds.clear()
-                        scope.launch { itemRepository.deleteAll(ids) }
+                        scope.launch { itemRepository.deleteAll(ids); notify("${thingies(ids.size)} deleted") }
                     }) { Text("Delete") }
                 },
                 dismissButton = { TextButton(onClick = { confirmBulkDelete = false }) { Text("Cancel") } },

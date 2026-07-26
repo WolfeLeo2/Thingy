@@ -154,6 +154,7 @@ fun ItemDetailScreen(
     var menu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var showSpaces by remember { mutableStateOf(false) }
+    val notify = LocalNotify.current
     val activeId = itemIds.getOrNull(pagerState.currentPage)
     val activeItem by remember(activeId) {
         if (activeId != null) itemRepository.item(activeId) else kotlinx.coroutines.flow.flowOf(null)
@@ -334,7 +335,8 @@ fun ItemDetailScreen(
             confirmButton = {
                 TextButton(onClick = {
                     confirmDelete = false
-                    if (activeId != null) scope.launch { itemRepository.delete(activeId); onBack() }
+                    val name = activeItem?.displayTitle() ?: "Thingy"
+                    if (activeId != null) scope.launch { itemRepository.delete(activeId); notify("$name deleted"); onBack() }
                 }) { Text("Delete") }
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
@@ -343,7 +345,7 @@ fun ItemDetailScreen(
 
     if (showSpaces) {
         activeId?.let { id ->
-            ManageSpacesDialog(id, spaceRepository, classifier, onDismiss = { showSpaces = false })
+            ManageSpacesDialog(id, spaceRepository, itemRepository, classifier, onDismiss = { showSpaces = false })
         }
     }
 }

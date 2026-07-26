@@ -28,7 +28,12 @@ android {
         versionCode = (project.findProperty("VERSION_CODE") as String?)?.toIntOrNull() ?: 1
         versionName = project.findProperty("VERSION_NAME") as String? ?: "1.0"
         ndk {
-            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
+            // arm64 only. Mapbox's native libs are ~2/3 of the APK and were shipping twice; every
+            // device at minSdk 29 is arm64 (Play has required 64-bit since Aug 2019), so the v7a
+            // slice was dead weight on every install. Kept as a single APK on purpose — per-ABI
+            // splits would mean UpdateChecker has to pick the right asset by Build.SUPPORTED_ABIS
+            // instead of the first .apk it sees.
+            abiFilters.add("arm64-v8a")
         }
         resValue(
             "string", "mapbox_access_token",
