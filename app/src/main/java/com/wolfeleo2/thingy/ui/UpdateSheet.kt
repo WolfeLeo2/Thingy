@@ -36,12 +36,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,9 +46,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -65,12 +60,7 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import com.wolfeleo2.thingy.data.AppUpdate
-import com.wolfeleo2.thingy.data.UpdateChecker
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
 import org.commonmark.node.BlockQuote
 import org.commonmark.node.BulletList
 import org.commonmark.node.Code
@@ -87,49 +77,26 @@ import org.commonmark.node.Paragraph
 import org.commonmark.node.SoftLineBreak
 import org.commonmark.node.StrongEmphasis
 import org.commonmark.parser.Parser
-import java.io.File
 import org.commonmark.node.Text as CmText
 
+// Progress/error/job state is owned by the caller (SettingsScreen) so a download survives this
+// sheet being minimized or reopened — this composable just renders whatever state it's handed.
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun UpdateSheet(
     update: AppUpdate,
-    onDismiss: () -> Unit
+    downloading: Boolean,
+    dlBytes: Long,
+    dlTotal: Long,
+    error: String?,
+    onStartDownload: () -> Unit,
+    onCancelDownload: () -> Unit,
+    onDismiss: () -> Unit,
 ) {
-    val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
-    val checker = remember { UpdateChecker(context) }
-    val scope = rememberCoroutineScope()
-    var downloading by remember { mutableStateOf(false) }
-    var downloadJob by remember { mutableStateOf<Job?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var dlBytes by remember { mutableLongStateOf(0L) }
-    var dlTotal by remember { mutableLongStateOf(0L) }
-    // Set once the APK is fully downloaded but install() had to redirect to the "allow unknown
-    // sources" setting — resumed from ON_RESUME below instead of forcing a full redownload.
-    var pendingInstallFile by remember { mutableStateOf<File?>(null) }
-
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                val file = pendingInstallFile
-                if (file != null && checker.canInstallPackages()) {
-                    pendingInstallFile = null
-                    // install() rejects a package that didn't survive the permission detour — surface
-                    // that instead of throwing out of a lifecycle callback.
-                    runCatching { checker.install(file) }
-                        .onSuccess { launched -> if (launched) onDismiss() }
-                        .onFailure { error = it.message }
-                }
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
 
     ModalBottomSheet(
-        onDismissRequest = { if (!downloading) onDismiss() },
+        onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ) {
         Column(
@@ -239,25 +206,7 @@ fun UpdateSheet(
                                 enabled = !downloading,
                                 onClick = {
                                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    downloading = true
-                                    error = null
-                                    dlBytes = 0L
-                                    dlTotal = 0L
-                                    downloadJob = scope.launch {
-                                        runCatching {
-                                            val file = checker.download(update) { done, total -> dlBytes = done; dlTotal = total }
-                                            if (checker.install(file)) {
-                                                onDismiss()
-                                            } else {
-                                                // Redirected to the "allow unknown sources" setting — resume
-                                                // the install from the already-downloaded file on ON_RESUME.
-                                                pendingInstallFile = file
-                                            }
-                                        }.onFailure {
-                                            error = "Download failed: ${it.message}"
-                                        }
-                                        downloading = false
-                                    }
+                                    onStartDownload()
                                 },
                             ) {
                                 Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -285,8 +234,7 @@ fun UpdateSheet(
                             onClick = {
                                 laterMenuExpanded = false
                                 if (downloading) {
-                                    downloadJob?.cancel()
-                                    downloading = false
+                                    onCancelDownload()
                                 } else {
                                     onDismiss()
                                 }

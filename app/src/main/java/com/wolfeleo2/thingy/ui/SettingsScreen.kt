@@ -12,8 +12,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -36,6 +38,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -53,7 +56,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.wolfeleo2.thingy.BuildConfig
@@ -68,8 +74,10 @@ import com.wolfeleo2.thingy.data.SpacesLayout
 import com.wolfeleo2.thingy.data.UpdateChecker
 import com.wolfeleo2.thingy.ui.theme.dynamicColorSupported
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.File
 
 // Profile page: who you are + how much you've saved, plus the color toggle and sign-out.
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -101,9 +109,62 @@ fun SettingsScreen(
     var checkingUpdate by remember { mutableStateOf(false) }
     var checkStatus by remember { mutableStateOf<String?>(null) }
 
+    // Hoisted here (not owned by UpdateSheet) so the download and its progress survive the sheet
+    // being minimized/reopened — the sheet is just a view over this state, not the source of it.
+    var showUpdateSheet by remember { mutableStateOf(false) }
+    var updateDownloading by remember { mutableStateOf(false) }
+    var updateDownloadJob by remember { mutableStateOf<Job?>(null) }
+    var updateError by remember { mutableStateOf<String?>(null) }
+    var updateDlBytes by remember { mutableLongStateOf(0L) }
+    var updateDlTotal by remember { mutableLongStateOf(0L) }
+    // Set once the APK is fully downloaded but install() had to redirect to the "allow unknown
+    // sources" setting — resumed from ON_RESUME below instead of forcing a full redownload.
+    var pendingInstallFile by remember { mutableStateOf<File?>(null) }
+
     LaunchedEffect(Unit) {
         val update = runCatching { updateChecker.check(BuildConfig.VERSION_NAME) }.getOrNull()
-        if (update != null) availableUpdate = update
+        if (update != null) { availableUpdate = update; showUpdateSheet = true }
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val file = pendingInstallFile
+                if (file != null && updateChecker.canInstallPackages()) {
+                    pendingInstallFile = null
+                    runCatching { updateChecker.install(file) }
+                        .onSuccess { launched -> if (launched) { availableUpdate = null; showUpdateSheet = false } }
+                        .onFailure { updateError = it.message }
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    fun startUpdateDownload() {
+        val update = availableUpdate ?: return
+        updateDownloading = true
+        updateError = null
+        updateDlBytes = 0L
+        updateDlTotal = 0L
+        updateDownloadJob = scope.launch {
+            runCatching {
+                val file = updateChecker.download(update) { done, total -> updateDlBytes = done; updateDlTotal = total }
+                if (updateChecker.install(file)) {
+                    availableUpdate = null
+                    showUpdateSheet = false
+                } else {
+                    // Redirected to the "allow unknown sources" setting — resume the install from
+                    // the already-downloaded file on ON_RESUME.
+                    pendingInstallFile = file
+                }
+            }.onFailure {
+                updateError = "Download failed: ${it.message}"
+            }
+            updateDownloading = false
+        }
     }
 
     Scaffold(
@@ -236,7 +297,10 @@ fun SettingsScreen(
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text("Thingy v${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                        fun mb(b: Long) = "%.1f MB".format(b / 1_000_000.0)
                         val statusText = when {
+                            updateDownloading && updateDlTotal > 0 -> "Downloading — ${mb(updateDlBytes)} / ${mb(updateDlTotal)}"
+                            updateDownloading -> "Downloading update…"
                             availableUpdate != null -> "New update v${availableUpdate?.version} available!"
                             checkingUpdate -> "Checking for updates…"
                             checkStatus != null -> checkStatus!!
@@ -247,13 +311,24 @@ fun SettingsScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = if (availableUpdate != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        if (updateDownloading) {
+                            Spacer(Modifier.height(6.dp))
+                            if (updateDlTotal > 0) {
+                                LinearProgressIndicator(
+                                    progress = { (updateDlBytes.toFloat() / updateDlTotal).coerceIn(0f, 1f) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            } else {
+                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                            }
+                        }
                     }
                     if (availableUpdate != null) {
                         Button(
-                            onClick = { /* UpdateSheet opens automatically when availableUpdate is non-null */ },
+                            onClick = { showUpdateSheet = true },
                             shapes = expressiveButtonShapes()
                         ) {
-                            Text("Update")
+                            Text(if (updateDownloading) "Downloading…" else "Update")
                         }
                     } else {
                         OutlinedButton(
@@ -266,6 +341,7 @@ fun SettingsScreen(
                                     checkingUpdate = false
                                     if (res != null) {
                                         availableUpdate = res
+                                        showUpdateSheet = true
                                     } else {
                                         checkStatus = "Latest version installed"
                                     }
@@ -283,8 +359,22 @@ fun SettingsScreen(
         }
     }
 
-    availableUpdate?.let { update ->
-        UpdateSheet(update = update, onDismiss = { availableUpdate = null })
+    if (showUpdateSheet) {
+        availableUpdate?.let { update ->
+            UpdateSheet(
+                update = update,
+                downloading = updateDownloading,
+                dlBytes = updateDlBytes,
+                dlTotal = updateDlTotal,
+                error = updateError,
+                onStartDownload = ::startUpdateDownload,
+                onCancelDownload = {
+                    updateDownloadJob?.cancel()
+                    updateDownloading = false
+                },
+                onDismiss = { showUpdateSheet = false },
+            )
+        }
     }
 }
 
