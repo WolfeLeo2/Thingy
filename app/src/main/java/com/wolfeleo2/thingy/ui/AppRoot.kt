@@ -14,6 +14,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -25,7 +26,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.util.UnstableApi
@@ -95,6 +99,20 @@ fun AppRoot(
     // same warm StateFlows instead of opening a second, independent Firestore listener.
     val library: LibraryViewModel = key(user?.uid) {
         viewModel { LibraryViewModel(itemRepository, spaceRepository) }
+    }
+    // Owns update-check/download + smart-search-download state in viewModelScope (survives Nav3
+    // popping Settings off the back stack — a rememberCoroutineScope() inside SettingsScreen does
+    // not, which is what silently killed in-flight downloads on navigating away).
+    val settingsViewModel: SettingsViewModel = key(user?.uid) {
+        viewModel { SettingsViewModel(appContext, settings, itemRepository, embedder) }
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, settingsViewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) settingsViewModel.retryPendingInstall()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     val onboardedFlow = remember(settings) { settings.onboardingComplete.map<Boolean, Boolean?> { it } }
     val onboarded by onboardedFlow.collectAsStateWithLifecycle(null)
@@ -272,7 +290,7 @@ fun AppRoot(
                         settings = settings,
                         itemRepository = itemRepository,
                         spaceRepository = spaceRepository,
-                        embedder = embedder,
+                        settingsViewModel = settingsViewModel,
                         onSignOut = { auth.signOut() },
                         onBack = onBack,
                     )

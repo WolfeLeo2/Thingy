@@ -26,7 +26,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -167,12 +167,12 @@ fun UpdateSheet(
             if (downloading) {
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (dlTotal > 0) {
-                        LinearWavyProgressIndicator(
+                        LinearProgressIndicator(
                             progress = { (dlBytes.toFloat() / dlTotal).coerceIn(0f, 1f) },
                             modifier = Modifier.fillMaxWidth(),
                         )
                     } else {
-                        LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     }
                     fun mb(b: Long) = "%.1f MB".format(b / 1_000_000.0)
                     Text(

@@ -52,11 +52,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -70,29 +68,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.wolfeleo2.thingy.BuildConfig
-import com.wolfeleo2.thingy.data.AppUpdate
 import com.wolfeleo2.thingy.data.AuthRepository
 import com.wolfeleo2.thingy.data.ColorSource
-import com.wolfeleo2.thingy.data.Embedder
 import com.wolfeleo2.thingy.data.ItemRepository
 import com.wolfeleo2.thingy.data.SettingsRepository
 import com.wolfeleo2.thingy.data.SpaceRepository
 import com.wolfeleo2.thingy.data.SpacesLayout
-import com.wolfeleo2.thingy.data.UpdateChecker
 import com.wolfeleo2.thingy.ui.theme.dynamicColorSupported
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.io.File
 
 // Profile page: who you are + how much you've saved, plus the color toggle and sign-out.
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -102,7 +90,7 @@ fun SettingsScreen(
     settings: SettingsRepository,
     itemRepository: ItemRepository,
     spaceRepository: SpaceRepository,
-    embedder: Embedder,
+    settingsViewModel: SettingsViewModel,
     onSignOut: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -112,76 +100,8 @@ fun SettingsScreen(
     val colorSource by settings.colorSource.collectAsStateWithLifecycle(ColorSource.DYNAMIC)
     val spacesLayout by settings.spacesLayout.collectAsStateWithLifecycle(SpacesLayout.GRID)
     val smartSearch by settings.smartSearchEnabled.collectAsStateWithLifecycle(false)
-    var downloading by remember { mutableStateOf(false) }
-    var downloadFailed by remember { mutableStateOf(false) }
-    var modelReady by remember { mutableStateOf(embedder.isReady()) }
-    var dlBytes by remember { mutableLongStateOf(0L) }
-    var dlTotal by remember { mutableLongStateOf(0L) }
     val items by remember { itemRepository.items() }.collectAsStateWithLifecycle(emptyList())
     val spaces by remember { spaceRepository.spaces() }.collectAsStateWithLifecycle(emptyList())
-    val context = LocalContext.current
-    val updateChecker = remember { UpdateChecker(context) }
-    var availableUpdate by remember { mutableStateOf<AppUpdate?>(null) }
-    var checkingUpdate by remember { mutableStateOf(false) }
-    var checkStatus by remember { mutableStateOf<String?>(null) }
-
-    // Hoisted here (not owned by UpdateSheet) so the download and its progress survive the sheet
-    // being minimized/reopened — the sheet is just a view over this state, not the source of it.
-    var showUpdateSheet by remember { mutableStateOf(false) }
-    var updateDownloading by remember { mutableStateOf(false) }
-    var updateDownloadJob by remember { mutableStateOf<Job?>(null) }
-    var updateError by remember { mutableStateOf<String?>(null) }
-    var updateDlBytes by remember { mutableLongStateOf(0L) }
-    var updateDlTotal by remember { mutableLongStateOf(0L) }
-    // Set once the APK is fully downloaded but install() had to redirect to the "allow unknown
-    // sources" setting — resumed from ON_RESUME below instead of forcing a full redownload.
-    var pendingInstallFile by remember { mutableStateOf<File?>(null) }
-
-    LaunchedEffect(Unit) {
-        val update = runCatching { updateChecker.check(BuildConfig.VERSION_NAME) }.getOrNull()
-        if (update != null) { availableUpdate = update; showUpdateSheet = true }
-    }
-
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                val file = pendingInstallFile
-                if (file != null && updateChecker.canInstallPackages()) {
-                    pendingInstallFile = null
-                    runCatching { updateChecker.install(file) }
-                        .onSuccess { launched -> if (launched) { availableUpdate = null; showUpdateSheet = false } }
-                        .onFailure { updateError = it.message }
-                }
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    fun startUpdateDownload() {
-        val update = availableUpdate ?: return
-        updateDownloading = true
-        updateError = null
-        updateDlBytes = 0L
-        updateDlTotal = 0L
-        updateDownloadJob = scope.launch {
-            runCatching {
-                val file = updateChecker.download(update) { done, total -> updateDlBytes = done; updateDlTotal = total }
-                if (updateChecker.install(file)) {
-                    availableUpdate = null
-                    showUpdateSheet = false
-                } else {
-                    // Redirected to the "allow unknown sources" setting — resume the install from
-                    // the already-downloaded file on ON_RESUME.
-                    pendingInstallFile = file
-                }
-            }.onFailure {
-                updateError = "Download failed: ${it.message}"
-            }
-            updateDownloading = false
-        }
-    }
 
     Scaffold(
         topBar = {
@@ -275,12 +195,15 @@ fun SettingsScreen(
             // Smart search: on-device semantic search. Enabling downloads the model once (kept out
             // of the APK to keep it small); once present it indexes existing items and runs offline.
             SettingsSection("Search") {
+                val downloading = settingsViewModel.smartSearchDownloading
+                val dlBytes = settingsViewModel.smartSearchDlBytes
+                val dlTotal = settingsViewModel.smartSearchDlTotal
                 fun mb(b: Long) = "%.1f MB".format(b / 1_000_000.0)
                 val status = when {
                     downloading && dlTotal > 0 -> "Downloading model — ${mb(dlBytes)} / ${mb(dlTotal)}"
                     downloading -> "Downloading model…"
-                    smartSearch && downloadFailed -> "Download failed. Try again?"
-                    smartSearch && modelReady -> "Semantic search is on"
+                    smartSearch && settingsViewModel.smartSearchDownloadFailed -> "Download failed. Try again?"
+                    smartSearch && settingsViewModel.smartSearchModelReady -> "Semantic search is on"
                     smartSearch -> "Preparing…"
                     else -> "Semantic search off."
                 }
@@ -292,17 +215,7 @@ fun SettingsScreen(
                         Switch(
                             checked = smartSearch,
                             enabled = !downloading,
-                            onCheckedChange = { on ->
-                                scope.launch {
-                                    settings.setSmartSearch(on)
-                                    if (on && !embedder.isReady()) {
-                                        downloading = true; downloadFailed = false; dlBytes = 0L; dlTotal = 0L
-                                        val ok = embedder.download { done, total -> dlBytes = done; dlTotal = total }
-                                        downloading = false; downloadFailed = !ok; modelReady = ok
-                                        if (ok) launch(Dispatchers.IO) { runCatching { embedder.backfill(itemRepository) } }
-                                    }
-                                }
-                            },
+                            onCheckedChange = { on -> settingsViewModel.setSmartSearch(on) },
                         )
                     },
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
@@ -322,13 +235,18 @@ fun SettingsScreen(
             }
 
             SettingsSection("Updates") {
+                val availableUpdate = settingsViewModel.availableUpdate
+                val updateDownloading = settingsViewModel.updateDownloading
+                val updateDlBytes = settingsViewModel.updateDlBytes
+                val updateDlTotal = settingsViewModel.updateDlTotal
+                val checkingUpdate = settingsViewModel.checkingUpdate
                 fun mb(b: Long) = "%.1f MB".format(b / 1_000_000.0)
                 val statusText = when {
                     updateDownloading && updateDlTotal > 0 -> "Downloading — ${mb(updateDlBytes)} / ${mb(updateDlTotal)}"
                     updateDownloading -> "Downloading update…"
-                    availableUpdate != null -> "New update v${availableUpdate?.version} available!"
+                    availableUpdate != null -> "New update v${availableUpdate.version} available!"
                     checkingUpdate -> "Checking for updates…"
-                    checkStatus != null -> checkStatus!!
+                    settingsViewModel.checkStatus != null -> settingsViewModel.checkStatus!!
                     else -> "App is up to date"
                 }
                 ListItem(
@@ -342,26 +260,13 @@ fun SettingsScreen(
                     leadingContent = { Icon(Icons.Filled.SystemUpdate, contentDescription = null) },
                     trailingContent = {
                         if (availableUpdate != null) {
-                            Button(onClick = { showUpdateSheet = true }, shapes = expressiveButtonShapes()) {
+                            Button(onClick = { settingsViewModel.showUpdateSheet = true }, shapes = expressiveButtonShapes()) {
                                 Text(if (updateDownloading) "Downloading…" else "Update")
                             }
                         } else {
                             OutlinedButton(
                                 enabled = !checkingUpdate,
-                                onClick = {
-                                    scope.launch {
-                                        checkingUpdate = true
-                                        checkStatus = null
-                                        val res = runCatching { updateChecker.check(BuildConfig.VERSION_NAME) }.getOrNull()
-                                        checkingUpdate = false
-                                        if (res != null) {
-                                            availableUpdate = res
-                                            showUpdateSheet = true
-                                        } else {
-                                            checkStatus = "Latest version installed"
-                                        }
-                                    }
-                                },
+                                onClick = { settingsViewModel.checkForUpdate() },
                                 shapes = expressiveButtonShapes(),
                             ) {
                                 Text(if (checkingUpdate) "Checking…" else "Check")
@@ -424,20 +329,17 @@ fun SettingsScreen(
         )
     }
 
-    if (showUpdateSheet) {
-        availableUpdate?.let { update ->
+    if (settingsViewModel.showUpdateSheet) {
+        settingsViewModel.availableUpdate?.let { update ->
             UpdateSheet(
                 update = update,
-                downloading = updateDownloading,
-                dlBytes = updateDlBytes,
-                dlTotal = updateDlTotal,
-                error = updateError,
-                onStartDownload = ::startUpdateDownload,
-                onCancelDownload = {
-                    updateDownloadJob?.cancel()
-                    updateDownloading = false
-                },
-                onDismiss = { showUpdateSheet = false },
+                downloading = settingsViewModel.updateDownloading,
+                dlBytes = settingsViewModel.updateDlBytes,
+                dlTotal = settingsViewModel.updateDlTotal,
+                error = settingsViewModel.updateError,
+                onStartDownload = settingsViewModel::startUpdateDownload,
+                onCancelDownload = settingsViewModel::cancelUpdateDownload,
+                onDismiss = { settingsViewModel.showUpdateSheet = false },
             )
         }
     }
