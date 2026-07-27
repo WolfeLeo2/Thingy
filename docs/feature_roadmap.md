@@ -61,6 +61,21 @@ the general feed, and filing it costs a further open → detail → add-to-space
 - No per-space icons (would need to render a cover thumbnail into an adaptive icon on a background
   thread and republish on every cover change) — one shared shape mark instead.
 
+### Why the targets appear inconsistently (2026-07-27)
+Direct Share rows are **offered at the system's discretion**, not the app's. The ShareSheet ranks
+them, throttles them, drops targets it considers cold, and some OEM sheets don't render them at all.
+There is no API to force one to appear — what Instagram shows is this same Sharing Shortcuts
+mechanism, so it's subject to the same lottery.
+
+What we do about it: `ShortcutManagerCompat.reportShortcutUsed()` whenever a share lands in a space.
+Usage is a direct input to the system's ranking, and an unreported shortcut drifts down and stops
+being offered. That's the whole mitigation.
+
+**Decided 2026-07-27: accept the non-determinism.** An in-app "which space?" picker on every unfiled
+share was built and then removed — it made the common case (just save it) cost an extra tap to buy
+certainty in the rare case. A share target that sometimes isn't offered is a better trade than a
+prompt that always is. Don't re-add it.
+
 ### Testing
 Share an image from Photos; the Android share sheet should offer "Thingy › <space>" rows, and
 picking one saves the image with that space's membership row already written.
@@ -90,22 +105,31 @@ write hasn't been acked yet — a just-saved item could surface as a "memory". N
 
 ---
 
-## 4. Export my data
+## 4. Export my data — *built, unreleased*
 
 **Goal:** Complete the privacy story. Self-service deletion shipped; portability is the other half,
 and it's the one thing a data-hoarding app owes its users.
 
 ### Approach
-- A `.zip` written straight to `Downloads` via `MediaStore` (no permission needed on API 29+):
-  `items.json` (every field of every owned item, spaces, memberships) plus the media files, taken
-  from `filesDir` where present and Cloudinary otherwise.
-- Run in a `WorkManager` job with a progress notification — this is minutes of work over a
-  connection, not something to hang a screen on.
+- `data/DataExporter.kt` writes a `.zip` straight to `Downloads` via `MediaStore` (no permission on
+  API 29+, and minSdk is 29 so there's no legacy branch): `thingy-export.json` — every field of
+  every owned item, plus spaces and memberships — `media/<itemId>.<ext>`, and a `README.txt`
+  explaining both.
+- Media resolution mirrors `Item.previewModel`'s precedence: on-device original → synced copy →
+  Cloudinary, so nothing already on the device is re-downloaded.
+- `ExportWorker` (WorkManager, `ExistingWorkPolicy.KEEP`) runs it with a progress notification on
+  its own low-importance channel. WorkManager rather than a ViewModel scope on purpose — the export
+  must survive leaving Settings and backgrounding the app.
 - Entry point: Settings → Account, directly above "Delete account".
 
 ### Deliberate limits
-Media that only ever existed on another device and was never Cloudinary-synced can't be exported;
-say so in the UI rather than silently producing a partial archive.
+- Media that only ever existed on another device and was never Cloudinary-synced can't be exported.
+  Those item ids are listed under `mediaMissing` in the manifest, counted in the completion
+  notification, and explained in the README — a partial archive that says so beats a silent one.
+- No foreground service, so the export lives inside WorkManager's ~10 minute window. Fine at this
+  scale; thousands of unsynced videos would need `setForeground` + the dataSync permission.
+- The manifest builder isn't unit-tested — `org.json` is a stub in JVM unit tests. Media resolution
+  and file naming, which is where the actual decisions are, is (`DataExportTest`).
 
 ---
 

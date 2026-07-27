@@ -9,6 +9,7 @@
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
     <share-target android:targetClass="com.wolfeleo2.thingy.MainActivity">
         <data android:mimeType="image/*" />
+        <data android:mimeType="video/*" />
         <data android:mimeType="text/*" />
         <category android:name="com.wolfeleo2.thingy.category.SAVE_TO_SPACE" />
     </share-target>

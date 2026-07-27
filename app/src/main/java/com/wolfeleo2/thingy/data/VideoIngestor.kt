@@ -131,11 +131,16 @@ class VideoIngestor(
                     }
                 }
                 
+                // Publish the local path the moment the transcode lands, BEFORE uploading. The
+                // classifier can't touch a content:// URI, so this is what unblocks it — and doing
+                // it here means a failed upload leaves a playable, classifiable local video instead
+                // of an item stuck in `processing` forever.
+                items.updateStoragePath(id, outputFile.absolutePath)
+
                 val bytes = outputFile.readBytes()
                 val (cloudUrl, _) = uploadToCloudinary(bytes) ?: return@runCatching
-                
-                // Patch the item with the cloud URL and the transcoded local file
-                items.updateImageUrl(id, cloudUrl, outputFile.absolutePath)
+
+                items.updateImageUrl(id, cloudUrl)
                 Log.i(TAG, "Cloudinary video upload complete for $id → $cloudUrl")
             }.onFailure {
                 Log.w(TAG, "Cloudinary video upload failed for $id", it)

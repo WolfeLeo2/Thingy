@@ -199,6 +199,14 @@ class ItemRepository(
     suspend fun snapshotItem(id: String): Item? =
         items.document(id).get().await().toObject(Item::class.java)
 
+    /** Every item this user owns, no status filter and no limit — the data export's source. */
+    suspend fun snapshotAllItems(): List<Item> {
+        val user = uid ?: return emptyList()
+        return items.whereEqualTo("userId", user)
+            .orderBy("createdAt", Query.Direction.DESCENDING).get().await()
+            .toObjects(Item::class.java)
+    }
+
     suspend fun snapshotReadyItems(limit: Long = 100): List<Item> {
         val user = uid ?: return emptyList()
         return items.whereEqualTo("userId", user)
@@ -214,6 +222,29 @@ class ItemRepository(
         val updates = mutableMapOf<String, Any>("imageUrl" to cloudinaryUrl)
         if (newStoragePath != null) updates["storagePath"] = newStoragePath
         items.document(id).update(updates).await()
+    }
+
+    /** Points an item at its finished local file — a video's transcode output, replacing the picked URI. */
+    suspend fun updateStoragePath(id: String, path: String) {
+        items.document(id).update("storagePath", path).await()
+    }
+
+    /**
+     * Re-queues videos that were marked `failed` only because the classifier raced their transcode
+     * (it threw on the content:// URI before the real file existed). One-shot self-heal on sign-in;
+     * a no-op once no such items remain.
+     */
+    suspend fun retryFailedVideos() {
+        val user = uid ?: return
+        val stale = items.whereEqualTo("userId", user)
+            .whereEqualTo("type", ItemType.VIDEO.wire)
+            .whereEqualTo("status", ItemStatus.FAILED.wire)
+            .get().await().toObjects(Item::class.java)
+            .filter { it.storagePath?.startsWith("/") == true && java.io.File(it.storagePath).exists() }
+        for (item in stale) {
+            runCatching { items.document(item.id).update("status", ItemStatus.PROCESSING.wire).await() }
+        }
+        if (stale.isNotEmpty()) Log.i("Thingy", "re-queued ${stale.size} failed video(s) for classification")
     }
 
     /** Permanently delete an item + its space memberships + its local image file. */

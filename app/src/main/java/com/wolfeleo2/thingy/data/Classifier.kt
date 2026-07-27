@@ -99,6 +99,11 @@ class Classifier(
                 return
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: MediaNotReadyYet) {
+                // Leave it `processing`. Patching storagePath emits a new feed snapshot, which
+                // re-enters this loop with the file actually present.
+                Log.i("Thingy", "classify deferred for ${item.id}: media still transcoding")
+                return
             } catch (e: Exception) {
                 attempt++
                 if (attempt >= MAX_ATTEMPTS) {
@@ -136,10 +141,12 @@ class Classifier(
                 model.generateContent(content { text(mediaPrompt(isVideo = false, spacesBlock)); image(bmp) })
             }
             ItemType.VIDEO.wire -> {
-                val path = item.storagePath?.takeIf { it.startsWith("/") } ?: throw IllegalStateException("Video has no local path")
-                val file = java.io.File(path)
-                if (!file.exists()) throw IllegalStateException("Video file missing")
-                val bytes = file.readBytes()
+                // storagePath is the picked content:// URI until the background transcode finishes and
+                // patches it to a real file. That's not a failure — it's "not yet". Failing here is
+                // what made every shared video end up `failed`: the retries (~6s) always lost the race
+                // against a transcode, and `failed` is terminal.
+                val path = localMediaPath(item) { java.io.File(it).exists() } ?: throw MediaNotReadyYet()
+                val bytes = java.io.File(path).readBytes()
                 model.generateContent(content { text(mediaPrompt(isVideo = true, spacesBlock)); inlineData(bytes, "video/mp4") })
             }
             else -> throw IllegalStateException("Unsupported type: ${item.type}")
@@ -594,6 +601,19 @@ class Classifier(
         val STEER_SCHEMA: Schema = Schema.obj(mapOf("intents" to Schema.array(INTENT_SCHEMA)))
     }
 }
+
+/** The item's media isn't on disk yet (a video mid-transcode). Retry later; never mark it failed. */
+internal class MediaNotReadyYet : Exception("Media not ready yet")
+
+/**
+ * The item's media as a readable local file, or null if it isn't on this disk yet.
+ *
+ * A freshly-picked video's `storagePath` is the `content://` URI it was picked from; the background
+ * transcode replaces it with a real path when it finishes. Null means "not yet", never "broken" —
+ * treating the two the same is what marked every shared video `failed` before it had a chance.
+ */
+internal fun localMediaPath(item: Item, exists: (String) -> Boolean): String? =
+    item.storagePath?.takeIf { it.startsWith("/") && exists(it) }
 
 private val WHITESPACE_RUN = Regex("\\s+")
 

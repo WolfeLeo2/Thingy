@@ -48,6 +48,9 @@
                 <action android:name="android.intent.action.SEND_MULTIPLE" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="image/*" />
+                <!-- Without this Thingy never even appears in a video share sheet; the ingest side
+                     (AppRoot routes video/* URIs to VideoIngestor) has always been ready for it. -->
+                <data android:mimeType="video/*" />
             </intent-filter>
             <!-- Per-space Direct Share targets; entries published at runtime by SpaceShortcuts. -->
             <meta-data

@@ -264,6 +264,17 @@ class SpaceRepository(
         }
     }
 
+    /** Every space this user can see, and every membership row they own — for the data export. */
+    suspend fun snapshotAllSpaces(): List<Space> {
+        val user = uid ?: return emptyList()
+        return spaces.whereArrayContains("memberIds", user).get().await().toObjects(Space::class.java)
+    }
+
+    suspend fun snapshotOwnMemberships(): List<SpaceItem> {
+        val user = uid ?: return emptyList()
+        return spaceItems.whereEqualTo("userId", user).get().await().toObjects(SpaceItem::class.java)
+    }
+
     suspend fun snapshotDynamicSpaces(): List<Space> {
         val user = uid ?: return emptyList()
         return spaces.whereArrayContains("memberIds", user).get().await()

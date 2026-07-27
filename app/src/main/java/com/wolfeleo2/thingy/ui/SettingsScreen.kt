@@ -27,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
@@ -64,6 +65,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -76,6 +78,7 @@ import com.wolfeleo2.thingy.data.AuthRepository
 import com.wolfeleo2.thingy.data.ColorSource
 import com.wolfeleo2.thingy.data.ItemRepository
 import com.wolfeleo2.thingy.data.SettingsRepository
+import com.wolfeleo2.thingy.data.ExportWorker
 import com.wolfeleo2.thingy.data.SpaceRepository
 import com.wolfeleo2.thingy.data.SpacesLayout
 import com.wolfeleo2.thingy.ui.theme.dynamicColorSupported
@@ -95,6 +98,8 @@ fun SettingsScreen(
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val notify = LocalNotify.current
     val user = auth.currentUser
     var showDeleteAccountDialog by remember { mutableStateOf(false) }
     val colorSource by settings.colorSource.collectAsStateWithLifecycle(ColorSource.DYNAMIC)
@@ -295,6 +300,19 @@ fun SettingsScreen(
                     leadingContent = { Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null) },
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     modifier = Modifier.clickable(onClick = onSignOut),
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest)
+                ListItem(
+                    headlineContent = { Text("Export my data") },
+                    supportingContent = { Text("A .zip in Downloads with everything you've saved") },
+                    leadingContent = { Icon(Icons.Filled.Download, contentDescription = null) },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    // WorkManager, not a coroutine scope: the export must survive leaving Settings
+                    // and backgrounding the app.
+                    modifier = Modifier.clickable {
+                        ExportWorker.start(context)
+                        notify("Exporting… you'll get a notification when it's ready.")
+                    },
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest)
                 ListItem(

@@ -88,9 +88,10 @@ class MainActivity : ComponentActivity() {
             data.lastPathSegment?.let { joinCode.value = it }
         }
         val type = intent.type.orEmpty()
-        // An image share often ALSO carries the page URL as EXTRA_TEXT — treat it as an image
-        // ONLY (image wins) so sharing a picture doesn't secretly also save a link.
-        if (type.startsWith("image/")) {
+        // An image share often ALSO carries the page URL as EXTRA_TEXT — treat it as media
+        // ONLY (media wins) so sharing a picture doesn't secretly also save a link.
+        // AppRoot re-checks each URI's real mime type and routes videos to VideoIngestor.
+        if (type.startsWith("image/") || type.startsWith("video/")) {
             val uris = when (intent.action) {
                 Intent.ACTION_SEND ->
                     IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let { listOf(it) } ?: emptyList()

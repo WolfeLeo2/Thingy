@@ -46,6 +46,7 @@ import com.wolfeleo2.thingy.data.ItemRepository
 import com.wolfeleo2.thingy.data.OfflineImageSyncer
 import com.wolfeleo2.thingy.data.SettingsRepository
 import com.wolfeleo2.thingy.data.SpaceRepository
+import androidx.core.content.pm.ShortcutManagerCompat
 import com.wolfeleo2.thingy.data.SpaceShortcuts
 import com.wolfeleo2.thingy.data.VideoIngestor
 import com.wolfeleo2.thingy.nav.Camera
@@ -146,6 +147,8 @@ fun AppRoot(
             }
             // Download any missing images to filesDir for true offline access.
             launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { offlineSyncer.run() } }
+            // Self-heal videos that were failed by the classifier/transcode race (fixed 2026-07-27).
+            launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { itemRepository.retryFailedVideos() } }
             runCatching { classifier.run() } // collects the feed; cancels on sign-out
         }
     }
@@ -269,6 +272,12 @@ fun AppRoot(
             }
             onImagesConsumed()
         }
+    }
+
+    // A share that DID pick a space is a usage signal — the system ranks Direct Share targets partly
+    // on this, and unreported shortcuts drift down and stop being offered.
+    LaunchedEffect(sharedSpaceId) {
+        sharedSpaceId?.let { runCatching { ShortcutManagerCompat.reportShortcutUsed(appContext, it) } }
     }
 
     // Keep the share sheet's per-space targets in step with the user's spaces.
