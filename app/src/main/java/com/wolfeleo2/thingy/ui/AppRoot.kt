@@ -55,6 +55,7 @@ import com.wolfeleo2.thingy.nav.Login
 import com.wolfeleo2.thingy.nav.Map
 import com.wolfeleo2.thingy.nav.NewSpace
 import com.wolfeleo2.thingy.nav.Onboarding
+import com.wolfeleo2.thingy.nav.PrivacyPolicy
 import com.wolfeleo2.thingy.nav.Settings
 import com.wolfeleo2.thingy.nav.SpaceDetail
 import com.wolfeleo2.thingy.ui.auth.LoginScreen
@@ -294,7 +295,14 @@ fun AppRoot(
             transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
             popTransitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
             entryProvider = entryProvider {
-                entry<Login> { LoginScreen(auth = auth, serverClientId = serverClientId) }
+                entry<Login> {
+                    LoginScreen(
+                        auth = auth,
+                        serverClientId = serverClientId,
+                        onOpenPolicy = { backStack.add(PrivacyPolicy) },
+                    )
+                }
+                entry<PrivacyPolicy> { PolicyScreen(onBack = onBack) }
                 entry<Onboarding> {
                     OnboardingScreen(onStart = { scope.launch { settings.setOnboardingComplete() } })
                 }

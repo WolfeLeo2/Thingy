@@ -16,6 +16,16 @@
 # Firestore annotations on the models (@DocumentId / @ServerTimestamp) must survive.
 -keepattributes *Annotation*,Signature
 
+# On-device embeddings (Embedder.kt) run through Play Services TFLite, whose Java classes are bound
+# to native code by name. Without this, R8's enum-unboxing deleted org.tensorflow.lite.DataType and
+# InterpreterApi$Options$TfLiteRuntime outright (they showed up as R8$$REMOVED$$CLASS$$ in
+# mapping.txt) — both are read across the JNI boundary, so smart search silently produced nothing on
+# release builds while debug worked fine. Enums crossing into native code must not be unboxed.
+-keep class org.tensorflow.lite.** { *; }
+-keep class com.google.android.gms.tflite.** { *; }
+-keepclassmembers enum org.tensorflow.lite.** { *; }
+-dontwarn org.tensorflow.**
+
 # Most SDKs ship consumer R8 rules; silence warnings for optional/absent classes they reference.
 -dontwarn javax.annotation.**
 -dontwarn javax.lang.model.**

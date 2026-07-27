@@ -7,6 +7,9 @@
 <meta name="description" content="Privacy policy for Thingy, a save-it-for-later app." />
 <meta name="theme-color" content="#fbf7ef" media="(prefers-color-scheme: light)" />
 <meta name="theme-color" content="#17130d" media="(prefers-color-scheme: dark)" />
+<!-- In <head> on purpose: gating the reveal styles before first paint avoids content flashing in
+     and then being hidden a moment later when the script at the end of the body runs. -->
+<script>document.documentElement.classList.add('js');</script>
 <style>
   :root {
     --bg: #fbf7ef;
@@ -228,12 +231,14 @@
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
 
   /* ---------- entrance motion ---------- */
+  /* Gated on .js (set by the script below), so with JavaScript off — as in the in-app WebView,
+     which has no business running scripts for a document — nothing is ever hidden. */
 
-  .reveal { opacity: 0; transform: translateY(14px); transition: opacity .5s ease, transform .5s ease; }
-  .reveal.in { opacity: 1; transform: none; }
+  .js .reveal { opacity: 0; transform: translateY(14px); transition: opacity .5s ease, transform .5s ease; }
+  .js .reveal.in { opacity: 1; transform: none; }
   @media (prefers-reduced-motion: reduce) {
     html { scroll-behavior: auto; }
-    .reveal { opacity: 1; transform: none; transition: none; }
+    .js .reveal { opacity: 1; transform: none; transition: none; }
     .card:hover { transform: none; }
     .progress { display: none; }
   }
@@ -411,12 +416,11 @@
 </div>
 
 <script>
-  // Reveal-on-scroll. No-JS or reduced-motion users get everything visible via CSS.
+  // Reveal-on-scroll. Without this script the .js gate never applies and everything is simply visible.
   const io = new IntersectionObserver((entries) => {
     for (const e of entries) if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
   }, { rootMargin: '0px 0px -8% 0px' });
   document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
 </script>
-<noscript><style>.reveal { opacity: 1; transform: none; }</style></noscript>
 </body>
 </html>

@@ -65,6 +65,7 @@ import kotlin.time.Duration.Companion.milliseconds
 fun LoginScreen(
     auth: AuthRepository,
     serverClientId: String?,
+    onOpenPolicy: () -> Unit = {},
     viewModel: LoginViewModel = viewModel { LoginViewModel(auth) }
 ) {
     val context = LocalContext.current
@@ -173,15 +174,19 @@ fun LoginScreen(
                         Text(
                             buildAnnotatedString {
                                 append("By using Thingy, you accept our ")
+                                // Clickable instead of LinkAnnotation.Url: the policy opens in-app
+                                // (PolicyScreen) rather than kicking the user out to a browser
+                                // mid-sign-in.
                                 withLink(
-                                    LinkAnnotation.Url(
-                                        url = "https://wolfeleo2.github.io/Thingy/",
+                                    LinkAnnotation.Clickable(
+                                        tag = "privacy",
                                         styles = TextLinkStyles(
                                             style = SpanStyle(
                                                 color = MaterialTheme.colorScheme.primary,
                                                 textDecoration = TextDecoration.Underline,
                                             )
                                         ),
+                                        linkInteractionListener = { onOpenPolicy() },
                                     )
                                 ) { append("Privacy Policy") }
                                 append(".")
