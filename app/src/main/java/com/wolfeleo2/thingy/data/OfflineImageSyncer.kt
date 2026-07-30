@@ -34,7 +34,7 @@ class OfflineImageSyncer(
         val snap = runCatching { 
             db.collection("items")
                 .whereEqualTo("userId", uid)
-                .whereIn("type", listOf(ItemType.IMAGE.wire, ItemType.VIDEO.wire, ItemType.LINK.wire))
+                .whereIn("type", listOf(ItemType.IMAGE.wire, ItemType.VIDEO.wire, ItemType.LINK.wire, ItemType.AUDIO.wire))
                 .get()
                 .await()
         }.getOrNull() ?: return@withContext
@@ -54,7 +54,7 @@ class OfflineImageSyncer(
             if (nativePath != null && nativePath.exists()) continue
             
             // Otherwise, check if we've already synced it
-            val ext = if (item.type == ItemType.VIDEO.wire) "mp4" else "webp"
+            val ext = syncedMediaExt(item.type)
             val syncedFile = File(syncDir, "${item.id}.$ext")
 
             if (!syncedFile.exists()) {

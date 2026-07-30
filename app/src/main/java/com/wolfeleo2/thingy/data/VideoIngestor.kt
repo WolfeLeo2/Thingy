@@ -56,9 +56,9 @@ class VideoIngestor(
 
         val durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
         val duration = durationStr?.toLongOrNull() ?: 0L
-        if (duration > 31_000L) { // 31s to allow tiny overflows
-            withContext(Dispatchers.Main) { Toast.makeText(context, "Video is too long (Limit: 30s)", Toast.LENGTH_LONG).show() }
-            throw IOException("Video exceeds 30s limit")
+        if (duration > 61_000L) { // 61s to allow tiny overflows
+            withContext(Dispatchers.Main) { Toast.makeText(context, "Video is too long (Limit: 60s)", Toast.LENGTH_LONG).show() }
+            throw IOException("Video exceeds 60s limit")
         }
 
         val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toDoubleOrNull() ?: 1.0

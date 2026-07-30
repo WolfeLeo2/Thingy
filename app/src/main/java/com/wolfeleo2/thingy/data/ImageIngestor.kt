@@ -134,7 +134,7 @@ class ImageIngestor(
                 items.updateImageUrl(id, cloudUrl)
                 Log.i(TAG, "Cloudinary upload complete for $id → $cloudUrl")
             }.onFailure {
-                Log.w(TAG, "Cloudinary upload failed for $id — item stays local", it)
+                SyncStatus.report("Image saved on this device, but couldn't back it up", it)
             }
         }
 

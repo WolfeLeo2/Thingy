@@ -80,6 +80,10 @@ async function purgeAccount(db, auth, uid, apiKey, apiSecret) {
     await deleteRefsInChunks(db, members.map((d) => d.ref));
     const invites = (await db.collection("invites").where("spaceId", "==", spaceId).get()).docs;
     await deleteRefsInChunks(db, invites.map((d) => d.ref));
+    // The whole thread goes with the space, including other members' comments — there is no space
+    // left for them to belong to.
+    const comments = (await db.collection("spaceComments").where("spaceId", "==", spaceId).get()).docs;
+    await deleteRefsInChunks(db, comments.map((d) => d.ref));
     await spaceDoc.ref.delete();
   }
   console.log(`  tore down ${ownedSpaceDocs.length} owned space(s)`);
@@ -93,6 +97,13 @@ async function purgeAccount(db, auth, uid, apiKey, apiSecret) {
   // 6. This user's own spaceMembers rows (join records) across every space.
   const spaceMemberDocs = (await db.collection("spaceMembers").where("userId", "==", uid).get()).docs;
   await deleteRefsInChunks(db, spaceMemberDocs.map((d) => d.ref));
+
+  // 6b. This user's comments in spaces they don't own. Comments normally survive their author
+  //     LEAVING a space, but not their account being deleted — that's the difference between
+  //     stepping away and erasing yourself, and the deletion promise is the stronger one.
+  const ownCommentDocs = (await db.collection("spaceComments").where("userId", "==", uid).get()).docs;
+  await deleteRefsInChunks(db, ownCommentDocs.map((d) => d.ref));
+  console.log(`  deleted ${ownCommentDocs.length} comment(s)`);
 
   // 7. The deletion marker itself, then the Auth account — last, so a crash above is retryable
   //    tomorrow instead of leaving an unreachable uid with orphaned data.

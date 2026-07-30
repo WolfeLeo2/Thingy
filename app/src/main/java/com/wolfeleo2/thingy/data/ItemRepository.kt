@@ -5,7 +5,10 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.MetadataChanges
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.QuerySnapshot
+import com.wolfeleo2.thingy.data.SyncStatus.reportFailure
 
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -22,14 +25,27 @@ class ItemRepository(
     private val spaceItems get() = db.collection("spaceItems")
     private val spaces get() = db.collection("spaces")
 
+    /**
+     * Like [QuerySnapshot.toObjects], but carries each doc's `hasPendingWrites` onto the model so
+     * the UI can badge a thingy that hasn't reached the server yet. Only the *listening* reads need
+     * this — a one-off `get()` is by definition already synced.
+     *
+     * Every listener feeding this MUST be registered with [MetadataChanges.INCLUDE]: acknowledging
+     * a pending write changes only metadata, not document data, so a default listener delivers no
+     * event for it and the badge would stay lit forever on an item that synced fine.
+     */
+    private fun QuerySnapshot.toItems(): List<Item> = documents.mapNotNull { doc ->
+        doc.toObject(Item::class.java)?.copy(pendingSync = doc.metadata.hasPendingWrites())
+    }
+
     fun items(): Flow<List<Item>> = callbackFlow {
         val user = uid ?: run { trySend(emptyList()); awaitClose { }; return@callbackFlow }
         val reg = items
             .whereEqualTo("userId", user)
             .orderBy("createdAt", Query.Direction.DESCENDING)
-            .addSnapshotListener { snap, err ->
+            .addSnapshotListener(MetadataChanges.INCLUDE) { snap, err ->
                 if (err != null) { Log.w("Thingy", "items listen failed", err); trySend(emptyList()); close() }
-                else trySend(snap?.toObjects(Item::class.java).orEmpty())
+                else trySend(snap?.toItems().orEmpty())
             }
         awaitClose { reg.remove() }
     }
@@ -52,13 +68,13 @@ class ItemRepository(
                 // event has to emit something even on failure, or combine() below never produces a
                 // value and one bad chunk would hide all the healthy ones.
                 var emitted = false
-                val reg = items.whereIn(FieldPath.documentId(), chunk).addSnapshotListener { snap, err ->
+                val reg = items.whereIn(FieldPath.documentId(), chunk).addSnapshotListener(MetadataChanges.INCLUDE) { snap, err ->
                     if (err != null) {
                         Log.w("Thingy", "itemsByIds listen failed", err)
                         if (!emitted) { emitted = true; trySend(emptyList()) }
                     } else {
                         emitted = true
-                        trySend(snap?.toObjects(Item::class.java).orEmpty())
+                        trySend(snap?.toItems().orEmpty())
                     }
                 }
                 awaitClose { reg.remove() }
@@ -68,9 +84,9 @@ class ItemRepository(
     }
 
     fun item(id: String): Flow<Item?> = callbackFlow {
-        val reg = items.document(id).addSnapshotListener { snap, err ->
+        val reg = items.document(id).addSnapshotListener(MetadataChanges.INCLUDE) { snap, err ->
             if (err != null) { Log.w("Thingy", "item listen failed", err); trySend(null); close() }
-            else trySend(snap?.toObject(Item::class.java))
+            else trySend(snap?.toObject(Item::class.java)?.copy(pendingSync = snap.metadata.hasPendingWrites()))
         }
         awaitClose { reg.remove() }
     }
@@ -117,23 +133,76 @@ class ItemRepository(
         spaceId,
     )
 
+    suspend fun createAudio(
+        imageUrl: String,
+        storagePath: String,
+        durationMillis: Long,
+        capturedAt: Long?,
+        latitude: Double?,
+        longitude: Double?,
+        spaceId: String? = null,
+    ): String = create(
+        Item(
+            type = ItemType.AUDIO.wire, imageUrl = imageUrl, storagePath = storagePath,
+            durationMillis = durationMillis, capturedAt = capturedAt,
+            latitude = latitude, longitude = longitude, searchText = "",
+        ),
+        spaceId,
+    )
+
+    /**
+     * None of the writes here are awaited, deliberately.
+     *
+     * A Firestore write Task only completes on *server acknowledgement*, so awaiting it made every
+     * save — camera shutter especially — block on a network round-trip (and, in release, on the
+     * App Check Play Integrity token behind it) before the UI could move on. The write is applied
+     * to the local cache synchronously either way, so the feed's snapshot listener shows the item
+     * immediately and the server catches up whenever it can. Offline, the save simply queues.
+     *
+     * Document ids are generated client-side, which is what makes this possible: [ref] has its id
+     * before anything touches the network.
+     */
     private suspend fun create(base: Item, spaceId: String?): String {
         val user = requireNotNull(uid) { "Not signed in" }
         val item = base.copy(userId = user, status = ItemStatus.PROCESSING.wire, visibleTo = listOf(user))
-        val ref = items.add(item).await()
+        val ref = items.document()
+        ref.set(item).reportFailure("Couldn't save — this thingy is only on this device")
         if (spaceId != null) {
             // Grant visibility BEFORE writing the membership row, never after. The row is what every
             // other member's space listener watches: the moment it lands they query this item, and if
             // visibleTo hasn't caught up yet that listen is rejected — permanently, because Firestore
             // does not retry a permission-denied listener. Their space screen then stays blank even
             // though the grant arrives milliseconds later.
-            val memberIds = spaces.document(spaceId).get().await().toObject(Space::class.java)?.memberIds.orEmpty()
-            if (memberIds.isNotEmpty()) items.document(ref.id).update("visibleTo", FieldValue.arrayUnion(*memberIds.toTypedArray())).await()
+            //
+            // Dropping the awaits does NOT weaken that ordering: Firestore delivers one client's
+            // mutations to the server in the order they were issued, so the arrayUnion still lands
+            // ahead of the spaceItems row.
+            val memberIds = spaceMemberIds(spaceId)
+            if (memberIds.isNotEmpty()) {
+                ref.update("visibleTo", FieldValue.arrayUnion(*memberIds.toTypedArray()))
+                    .reportFailure("Saved, but others in this space may not see it")
+            }
             spaceItems.document("${spaceId}_${ref.id}")
-                .set(SpaceItem(userId = user, spaceId = spaceId, itemId = ref.id, status = SpaceItemStatus.SAVED.wire)).await()
+                .set(SpaceItem(userId = user, spaceId = spaceId, itemId = ref.id, status = SpaceItemStatus.SAVED.wire))
+                .reportFailure("Saved, but couldn't add it to the space")
         }
         return ref.id
     }
+
+    /**
+     * Server-first, deliberately — this is the one read in the save path that must NOT come from
+     * cache.
+     *
+     * memberIds decides who can ever read the item. A cached space doc that predates someone
+     * joining yields a short member list, so the item is written readable to fewer people than it
+     * should be — and because `itemsByIds` uses a whereIn listen, which security rules reject
+     * wholesale when any single matching doc is unreadable, one such item blanks the entire space
+     * screen for that member. The damage is silent, permanent until repaired, and costs a co-member
+     * their whole view; a few hundred milliseconds here is not worth that.
+     */
+    private suspend fun spaceMemberIds(spaceId: String): List<String> =
+        runCatching { spaces.document(spaceId).get().await().toObject(Space::class.java)?.memberIds }
+            .getOrNull().orEmpty()
 
     /** Write the classifier's result and flip to `ready`. */
     suspend fun finalize(
@@ -148,8 +217,9 @@ class ItemRepository(
         heroImageUrl: String? = null,
         aspectRatio: Double? = null,
         ocrText: String? = null,
+        transcript: String? = null,
     ) {
-        val searchText = buildSearchText(title, description, tags, note, ocrText)
+        val searchText = buildSearchText(title, description, tags, note, ocrText, transcript)
         val update = mutableMapOf<String, Any?>(
             "title" to title,
             "description" to description,
@@ -159,6 +229,7 @@ class ItemRepository(
             "status" to ItemStatus.READY.wire,
         )
         ocrText?.takeIf { it.isNotBlank() }?.let { update["ocrText"] = it }
+        transcript?.takeIf { it.isNotBlank() }?.let { update["transcript"] = it }
         content?.let { update["content"] = it }
         siteName?.let { update["siteName"] = it }
         heroImageUrl?.let { update["heroImageUrl"] = it }
@@ -304,5 +375,7 @@ internal fun buildSearchText(
     tags: List<String>,
     note: String?,
     ocrText: String?,
-): String = listOf(title, description, tags.joinToString(" "), note.orEmpty(), ocrText.orEmpty())
-    .filter { it.isNotBlank() }.joinToString(" ").trim()
+    transcript: String? = null,
+): String = listOf(
+    title, description, tags.joinToString(" "), note.orEmpty(), ocrText.orEmpty(), transcript.orEmpty(),
+).filter { it.isNotBlank() }.joinToString(" ").trim()

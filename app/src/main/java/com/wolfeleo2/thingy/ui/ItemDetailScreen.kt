@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NorthEast
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
@@ -53,6 +54,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedAssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
@@ -61,6 +63,7 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedListItem
+import androidx.compose.material3.Slider
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Surface
@@ -73,6 +76,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -117,12 +121,14 @@ import com.wolfeleo2.thingy.data.ProductsStatus
 import com.wolfeleo2.thingy.data.SettingsRepository
 import com.wolfeleo2.thingy.data.SpaceRepository
 import com.wolfeleo2.thingy.data.displayTitle
+import com.wolfeleo2.thingy.data.formatDuration
 import com.wolfeleo2.thingy.lib.formatItemDate
 import com.wolfeleo2.thingy.lib.runIntent
 import com.wolfeleo2.thingy.reminders.ReminderManager
 import com.wolfeleo2.thingy.ui.reminders.SnoozeSheet
 import com.wolfeleo2.thingy.ui.reminders.formatSnoozeTime
 import com.wolfeleo2.thingy.ui.theme.ThingyTheme
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.net.URI
 
@@ -446,7 +452,11 @@ private fun DetailPageContent(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        if (heroUrl != null) Hero(item, heroUrl, imageShared, isActive, onColorExtracted)
+        if (item.type == ItemType.AUDIO.wire) {
+            AudioPlayer(item, isActive)
+        } else if (heroUrl != null) {
+            Hero(item, heroUrl, imageShared, isActive, onColorExtracted)
+        }
 
         if (ItemStatus.from(item.status) == ItemStatus.PROCESSING) {
             Row(
@@ -493,6 +503,19 @@ private fun DetailPageContent(
 
         if (item.type == ItemType.NOTE.wire) item.note?.let {
             Text(it, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+        }
+
+        // What was actually said. Selectable because the whole point of transcribing an address or
+        // a phone number is being able to lift it back out.
+        if (item.type == ItemType.AUDIO.wire) item.transcript?.let {
+            SelectionContainer {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
 
         item.tags.takeIf { it.isNotEmpty() }?.let { tags ->
@@ -740,6 +763,129 @@ private fun Hero(
             // heroImageRequest reuses the feed's cached bitmap as a placeholder → no fade-from-blank flash.
             AsyncImage(model = item.heroImageRequest(url), contentDescription = item.title, contentScale = ContentScale.Crop,
                 modifier = innerModifier)
+        }
+    }
+}
+
+/**
+ * Playback for a voice note: play/pause, a scrubber, and elapsed/total.
+ *
+ * Reuses ExoPlayer rather than MediaPlayer — media3 is already a dependency for video, it handles
+ * both the local file and the Cloudinary URL through the same API, and [mediaSource] means an
+ * offline device plays its own copy instead of failing on the network.
+ *
+ * Unlike [VideoHero] this does NOT autoplay on becoming active: audio starting by itself while you
+ * swipe through a feed is startling in a way a muted looping video isn't.
+ */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun AudioPlayer(item: Item, isActive: Boolean) {
+    val context = LocalContext.current
+    val source = remember(item.id) { item.mediaSource(context) }
+    val exoPlayer = remember(item.id) { ExoPlayer.Builder(context).build() }
+
+    var isPlaying by remember(item.id) { mutableStateOf(false) }
+    var positionMs by remember(item.id) { mutableLongStateOf(0L) }
+    var error by remember(item.id) { mutableStateOf<String?>(null) }
+
+    // Prefer the recorded duration: ExoPlayer reports TIME_UNSET until the media is prepared, and
+    // for a streamed Cloudinary URL that can be a visible beat after the screen opens.
+    val durationMs = item.durationMillis?.takeIf { it > 0 }
+        ?: exoPlayer.duration.takeIf { it > 0 } ?: 0L
+
+    LaunchedEffect(item.id, source) {
+        val src = source ?: run { error = "This voice note isn't available offline"; return@LaunchedEffect }
+        val uri = if (src is java.io.File) android.net.Uri.fromFile(src) else src.toString().toUri()
+        exoPlayer.setMediaItem(MediaItem.fromUri(uri))
+        exoPlayer.prepare()
+    }
+
+    // Swiping to another item in the pager stops this one — otherwise it keeps talking off-screen.
+    LaunchedEffect(isActive) { if (!isActive) exoPlayer.pause() }
+
+    LaunchedEffect(isPlaying) {
+        while (isPlaying) {
+            positionMs = exoPlayer.currentPosition
+            delay(200)
+        }
+    }
+
+    DisposableEffect(exoPlayer) {
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+            override fun onPlayerError(e: PlaybackException) {
+                error = "Couldn't play this voice note"
+                isPlaying = false
+            }
+            override fun onPlaybackStateChanged(state: Int) {
+                // Leave the scrubber at the end rather than snapping to 0 on completion.
+                if (state == Player.STATE_ENDED) positionMs = durationMs
+            }
+        }
+        exoPlayer.addListener(listener)
+        onDispose { exoPlayer.removeListener(listener); exoPlayer.release() }
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(exoPlayer, lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) exoPlayer.pause()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    Surface(
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        shape = RoundedCornerShape(24.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FilledIconButton(
+                onClick = {
+                    when {
+                        error != null -> return@FilledIconButton
+                        isPlaying -> exoPlayer.pause()
+                        else -> {
+                            // Replay from the top once it's finished, rather than doing nothing.
+                            if (durationMs > 0 && positionMs >= durationMs - 250) exoPlayer.seekTo(0)
+                            exoPlayer.play()
+                        }
+                    }
+                },
+                enabled = error == null,
+                modifier = Modifier.size(56.dp),
+            ) {
+                Icon(
+                    if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = if (isPlaying) "Pause" else "Play",
+                )
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                if (error != null) {
+                    Text(error!!, style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error)
+                } else {
+                    Slider(
+                        value = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f,
+                        onValueChange = { fraction ->
+                            if (durationMs > 0) {
+                                positionMs = (fraction * durationMs).toLong()
+                                exoPlayer.seekTo(positionMs)
+                            }
+                        },
+                    )
+                    Text(
+                        "${formatDuration(positionMs)} / ${formatDuration(durationMs)}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
     }
 }

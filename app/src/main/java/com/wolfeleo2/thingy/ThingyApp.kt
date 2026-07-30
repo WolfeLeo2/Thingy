@@ -16,9 +16,13 @@ class ThingyApp : Application(), SingletonImageLoader.Factory {
         // Install App Check before any Firebase service is used.
         // The debug provider is substituted automatically in debug builds via
         // the debugImplementation dependency; release builds use Play Integrity.
-        FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
+        val appCheck = FirebaseAppCheck.getInstance()
+        appCheck.installAppCheckProviderFactory(
             appCheckProviderFactory() // debug/ → DebugAppCheckProviderFactory, release/ → PlayIntegrity
         )
+        // Kick the Play Integrity round-trip (~3s cold) here so it overlaps the rest of startup
+        // instead of being triggered lazily by the first Firestore read and serialising behind it.
+        appCheck.getAppCheckToken(false)
     }
 
     // Coil3 doesn't wire a network fetcher by default; register OkHttp explicitly.

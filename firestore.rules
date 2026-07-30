@@ -82,6 +82,43 @@ service cloud.firestore {
       allow delete: if signedIn() && isMember(resource.data.spaceId);
     }
 
+    match /spaceComments/{id} {
+      // Comments are always queried scoped to one space, so isMember() can authorize them directly
+      // and they need no denormalized visibility array — unlike items, which are queried globally by
+      // userId and therefore carry visibleTo. A new member consequently sees the whole thread with
+      // no backfill, and there's no missing-field trap to fall into.
+      //
+      // The author clause is NOT redundant, and it is first so it short-circuits the get(): comments
+      // deliberately outlive their author leaving the space, so the export's
+      // `where userId == uid` sweep would match docs in spaces the user is no longer a member of.
+      // A query is denied wholesale when any matched doc fails, so without this one departed space
+      // silently emptied the entire comments section of the data export.
+      allow read: if signedIn() && (
+        resource.data.userId == request.auth.uid || isMember(resource.data.spaceId)
+      );
+      allow create: if signedIn() && isMember(request.resource.data.spaceId)
+        && request.resource.data.userId == request.auth.uid
+        // Bound the text server-side: nothing else stops a member posting a megabyte, and the sheet
+        // would render it.
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 2000
+        // Pin the timestamp to the server's clock — the @ServerTimestamp sentinel satisfies this.
+        // A client-chosen far-future createdAt would become the newest comment, and since the unread
+        // cursor is stamped from it and never moves backwards, every genuine comment after it would
+        // be born already-read with no way back.
+        && request.resource.data.createdAt == request.time;
+      // Text is immutable: an edited comment in a shared thread rewrites what others already read.
+      allow update: if false;
+      // Author OR space owner. The owner half matters because comments outlive their author leaving
+      // the space — someone has to be able to tidy up afterwards. Note isOwner() reads the space
+      // doc, so deleting a comment in a space that has since been deleted falls back to the author
+      // check, which is what lets a departed member still remove their own.
+      allow delete: if signedIn() && (
+        resource.data.userId == request.auth.uid || isOwner(resource.data.spaceId)
+      );
+    }
+
     // Self-service account deletion marker: doc id == uid, so "own this row" is just an id check.
     // The nightly purge workflow (tools/account-purge) reads/writes these with the Admin SDK,
     // which bypasses rules entirely — these rules only govern the client.

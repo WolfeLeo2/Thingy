@@ -61,6 +61,7 @@ class DataExporter(
         val allItems = items.snapshotAllItems()
         val allSpaces = spaces.snapshotAllSpaces()
         val memberships = spaces.snapshotOwnMemberships()
+        val comments = spaces.snapshotOwnComments()
 
         val refs = allItems.associateWith { mediaRefFor(it) { path -> File(path).exists() } }
         val missing = mutableListOf<String>()
@@ -101,7 +102,7 @@ class DataExporter(
 
                     zip.putNextEntry(ZipEntry("thingy-export.json"))
                     zip.write(
-                        buildManifest(uid, allItems, allSpaces, memberships, missing).toByteArray(),
+                        buildManifest(uid, allItems, allSpaces, memberships, missing, comments).toByteArray(),
                     )
                     zip.closeEntry()
 
@@ -197,6 +198,7 @@ internal fun buildManifest(
     spaces: List<Space>,
     memberships: List<SpaceItem>,
     mediaMissing: List<String>,
+    comments: List<SpaceComment> = emptyList(),
 ): String {
     val iso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
         .apply { timeZone = TimeZone.getTimeZone("UTC") }
@@ -214,6 +216,7 @@ internal fun buildManifest(
                 .put("items", items.size)
                 .put("spaces", spaces.size)
                 .put("memberships", memberships.size)
+                .put("comments", comments.size)
                 .put("mediaMissing", mediaMissing.size),
         )
         .put("mediaMissing", JSONArray(mediaMissing))
@@ -235,6 +238,7 @@ internal fun buildManifest(
                         .put("content", item.content)
                         .put("tags", JSONArray(item.tags))
                         .put("ocrText", item.ocrText)
+                        .put("transcript", item.transcript)
                         .put("searchText", item.searchText)
                         .put("imageUrl", item.imageUrl)
                         .put("heroImageUrl", item.heroImageUrl)
@@ -297,6 +301,21 @@ internal fun buildManifest(
                 put(
                     JSONObject().put("spaceId", it.spaceId).put("itemId", it.itemId)
                         .put("status", it.status ?: SpaceItemStatus.SAVED.wire),
+                )
+            }
+        },
+    )
+
+    // Only this user's own comments. The rest of a shared thread is other people's writing — it
+    // isn't this user's data to take, and exporting it would leak co-members' names into a file
+    // they never see.
+    root.put(
+        "comments",
+        JSONArray().apply {
+            comments.forEach {
+                put(
+                    JSONObject().put("spaceId", it.spaceId).put("text", it.text)
+                        .put("createdAt", date(it.createdAt)),
                 )
             }
         },

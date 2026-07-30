@@ -5,6 +5,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
+import com.wolfeleo2.thingy.data.SyncStatus.reportFailure
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -22,6 +23,7 @@ class SpaceRepository(
     private val spaceItems get() = db.collection("spaceItems")
     private val spaceMembers get() = db.collection("spaceMembers")
     private val invites get() = db.collection("invites")
+    private val spaceComments get() = db.collection("spaceComments")
     private val items get() = db.collection("items")
 
     /**
@@ -113,6 +115,64 @@ class SpaceRepository(
         awaitClose { reg.remove() }
     }
 
+    /**
+     * The comment thread for [spaceId], oldest first.
+     *
+     * Ordered server-side, which needs the composite index on (spaceId, createdAt) — without it
+     * this listen fails outright rather than degrading to unordered.
+     *
+     * An error must not overwrite a thread we've already shown with an empty one: a missing index or
+     * a momentary denial would silently look like "nobody has said anything", which is the same
+     * failure that turned one rejected listen into a blank space screen (see [ItemRepository]).
+     * The first event still has to emit something so collectors aren't left hanging.
+     */
+    fun commentsForSpace(spaceId: String): Flow<List<SpaceComment>> = callbackFlow {
+        var emitted = false
+        val reg = spaceComments
+            .whereEqualTo("spaceId", spaceId)
+            .orderBy("createdAt", Query.Direction.ASCENDING)
+            .addSnapshotListener { snap, err ->
+                if (err != null) {
+                    Log.w("Thingy", "space comments listen failed", err)
+                    if (!emitted) { emitted = true; trySend(emptyList()) }
+                } else {
+                    emitted = true
+                    trySend(snap?.toObjects(SpaceComment::class.java).orEmpty())
+                }
+            }
+        awaitClose { reg.remove() }
+    }
+
+    /**
+     * Posts a comment. Not awaited, like item creation: the local cache updates synchronously so
+     * the thread shows it immediately, and it queues rather than blocking if the network is down.
+     */
+    fun postComment(spaceId: String, text: String) {
+        val user = requireNotNull(uid) { "Not signed in" }
+        // Truncated, not rejected: the rules cap this at MAX_COMMENT_CHARS and would deny the write
+        // outright, which the user would only see as "Couldn't post that comment".
+        val trimmed = text.trim().take(MAX_COMMENT_CHARS)
+        if (trimmed.isEmpty()) return
+        spaceComments.document().set(
+            SpaceComment(
+                spaceId = spaceId,
+                userId = user,
+                text = trimmed,
+                authorName = auth.currentUser?.displayName,
+                authorPhotoUrl = auth.currentUser?.photoUrl?.toString(),
+            ),
+        ).reportFailure("Couldn't post that comment")
+    }
+
+    /**
+     * Deletes a comment. Permitted for its author and for the space owner — the owner needs it to
+     * tidy up after someone leaves, since comments deliberately outlive their author's membership.
+     * The rules enforce this too; this is just the client half.
+     */
+    fun deleteComment(commentId: String) {
+        spaceComments.document(commentId).delete().reportFailure("Couldn't delete that comment")
+    }
+
     suspend fun createSpace(name: String, dynamic: Boolean = true): String {
         val user = requireNotNull(uid) { "Not signed in" }
         val id = spaces.add(Space(userId = user, name = name, dynamic = dynamic, memberIds = listOf(user))).await().id
@@ -186,15 +246,22 @@ class SpaceRepository(
         val itemDocs = spaceItems.whereEqualTo("spaceId", id).get().await()
         val itemIds = itemDocs.documents.mapNotNull { it.getString("itemId") }.distinct()
         val memberDocs = spaceMembers.whereEqualTo("spaceId", id).get().await()
+        // Must be torn down here, with the space doc still present: the comment delete rule falls
+        // back to isOwner(spaceId), which reads that doc. Once it's gone isMember/isOwner are false
+        // for everyone forever, leaving the thread unreadable, undeletable and still stored.
+        val commentDocs = spaceComments.whereEqualTo("spaceId", id).get().await()
         // Drop the grants this space handed out before its memberIds become unreadable. Owner keeps
         // access via the rules' ownership check, so stripping them from visibleTo is safe.
         val revoked = space?.memberIds.orEmpty()
         // The teardown that's always permitted, in one batch. visibleTo is deliberately NOT in here:
         // the rules only let a user rewrite visibleTo on items they own, so including a co-member's item
         // failed the *entire* batch — which is why deleting a shared space silently did nothing.
+        // ponytail: items + members + invite + comments in one batch, against Firestore's 500-write
+        // ceiling. Fine for a hobby-scale space; chunk into batches of 500 if one ever gets big.
         val batch = db.batch()
         itemDocs.documents.forEach { batch.delete(it.reference) }
         memberDocs.documents.forEach { batch.delete(it.reference) }
+        commentDocs.documents.forEach { batch.delete(it.reference) }
         space?.activeInviteCode?.let { batch.delete(invites.document(it)) }
         batch.commit().await()
         spaces.document(id).delete().await()
@@ -273,6 +340,23 @@ class SpaceRepository(
     suspend fun snapshotOwnMemberships(): List<SpaceItem> {
         val user = uid ?: return emptyList()
         return spaceItems.whereEqualTo("userId", user).get().await().toObjects(SpaceItem::class.java)
+    }
+
+    /**
+     * This user's own comments across every space, for the data export.
+     *
+     * Deliberately not the whole thread: co-members' comments are their writing, not this user's
+     * data to hand over.
+     *
+     * No orderBy, so Firestore's automatic single-field index covers it — no composite needed. The
+     * rules must grant read on `userId == uid` independently of membership, or this sweep is denied
+     * outright once the user has left a space they commented in.
+     */
+    suspend fun snapshotOwnComments(): List<SpaceComment> {
+        val user = uid ?: return emptyList()
+        return runCatching {
+            spaceComments.whereEqualTo("userId", user).get().await().toObjects(SpaceComment::class.java)
+        }.getOrDefault(emptyList())
     }
 
     suspend fun snapshotDynamicSpaces(): List<Space> {

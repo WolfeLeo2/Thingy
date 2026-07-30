@@ -17,7 +17,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,17 +36,19 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.ui.LocalNavAnimatedContentScope
 import androidx.navigation3.ui.NavDisplay
+import com.wolfeleo2.thingy.data.AudioIngestor
 import com.wolfeleo2.thingy.data.AuthRepository
 import com.wolfeleo2.thingy.data.Classifier
 import com.wolfeleo2.thingy.data.CloudinaryMigration
 import com.wolfeleo2.thingy.data.Embedder
 import com.wolfeleo2.thingy.data.ImageIngestor
 import com.wolfeleo2.thingy.data.ItemRepository
-import com.wolfeleo2.thingy.data.OfflineImageSyncer
+import com.wolfeleo2.thingy.data.OfflineSyncWorker
 import com.wolfeleo2.thingy.data.SettingsRepository
 import com.wolfeleo2.thingy.data.SpaceRepository
 import androidx.core.content.pm.ShortcutManagerCompat
 import com.wolfeleo2.thingy.data.SpaceShortcuts
+import com.wolfeleo2.thingy.data.SyncStatus
 import com.wolfeleo2.thingy.data.VideoIngestor
 import com.wolfeleo2.thingy.nav.Camera
 import com.wolfeleo2.thingy.nav.Home
@@ -64,6 +65,8 @@ import com.wolfeleo2.thingy.ui.camera.CameraScreen
 import com.wolfeleo2.thingy.ui.onboarding.OnboardingScreen
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.days
+import kotlin.time.Duration.Companion.hours
 
 /**
  * Nav3 gate: root key derived from state (auth + onboarding); pushes (detail, space, settings)
@@ -100,21 +103,27 @@ fun AppRoot(
     val classifier = remember { Classifier(appContext, itemRepository, spaceRepository, embedder) }
     val ingestor = remember { ImageIngestor(appContext, itemRepository) }
     val videoIngestor = remember { VideoIngestor(appContext, itemRepository) }
+    val audioIngestor = remember { AudioIngestor(appContext, itemRepository) }
     val cloudinaryMigration = remember { CloudinaryMigration() }
-    val offlineSyncer = remember { OfflineImageSyncer(appContext) }
 
     val user by auth.authState.collectAsStateWithLifecycle(auth.currentUser)
 
     // Hoisted here (not inside MainShell) so MapScreen — a sibling nav destination — shares the
     // same warm StateFlows instead of opening a second, independent Firestore listener.
-    val library: LibraryViewModel = key(user?.uid) {
-        viewModel { LibraryViewModel(itemRepository, spaceRepository) }
+    // The uid must be the ViewModel's *store* key, not a Compose key(): viewModel() resolves from the
+    // Activity's ViewModelStore by class name, which key() has no effect on, so wrapping it returned
+    // the SAME instance after an account switch. That mattered because signing out makes Firestore
+    // re-evaluate every live listener with no auth, each handler close()s its callbackFlow, and a
+    // closed flow never re-emits — so the next account inherited three dead listeners and saw
+    // PERMISSION_DENIED on items/spaces/memberships until the process was restarted.
+    val library: LibraryViewModel = viewModel(key = "library:${user?.uid}") {
+        LibraryViewModel(itemRepository, spaceRepository)
     }
     // Owns update-check/download + smart-search-download state in viewModelScope (survives Nav3
     // popping Settings off the back stack — a rememberCoroutineScope() inside SettingsScreen does
     // not, which is what silently killed in-flight downloads on navigating away).
-    val settingsViewModel: SettingsViewModel = key(user?.uid) {
-        viewModel { SettingsViewModel(appContext, settings, itemRepository, embedder) }
+    val settingsViewModel: SettingsViewModel = viewModel(key = "settings:${user?.uid}") {
+        SettingsViewModel(appContext, settings, itemRepository, embedder)
     }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, settingsViewModel) {
@@ -135,38 +144,65 @@ fun AppRoot(
         }
     }
 
+    // Housekeeping. Each job is rate-limited by claimMaintenanceRun so it doesn't run on *every*
+    // cold start — they all hit Firestore/Cloudinary and were contending with the first listener
+    // for network. The one-off backfills get a long interval; the syncer stays comparatively eager.
     LaunchedEffect(user?.uid) {
         if (user != null) {
             // Migrate legacy items (local / Firebase Storage) to Cloudinary in the background.
-            launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { cloudinaryMigration.run() } }
-            // Backfill spaces created before sharing existed with memberIds, then repair any shared-space
-            // items whose visibleTo is missing co-members (one such item blanks the whole space screen).
             launch(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { spaceRepository.migrateLegacySpacesToMemberIds() }
+                if (settings.claimMaintenanceRun("cloudinary_migration", 1.days)) {
+                    runCatching { cloudinaryMigration.run() }
+                }
+            }
+            // Backfill spaces created before sharing existed with memberIds. A genuine one-time
+            // migration, so a long interval is fine.
+            launch(kotlinx.coroutines.Dispatchers.IO) {
+                if (settings.claimMaintenanceRun("space_backfills", 7.days)) {
+                    runCatching { spaceRepository.migrateLegacySpacesToMemberIds() }
+                }
+            }
+            // Repair shared-space items whose visibleTo is missing co-members. UNGATED on purpose:
+            // this is not housekeeping, it's the safety net for a failure that blanks a co-member's
+            // entire space screen and never self-corrects. Rate-limiting it once cost a week of
+            // being broken — claimMaintenanceRun stamps on claim, so one failed run disables the
+            // repair for the whole interval. Runs every launch, as it did before.
+            // ponytail: N document gets per shared space per launch. Fine at this app's scale; if a
+            // space ever holds hundreds of items, trigger it from the itemsByIds listen failure
+            // instead of on a timer.
+            launch(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching { spaceRepository.backfillSharedItemVisibility() }
             }
-            // Download any missing images to filesDir for true offline access.
-            launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { offlineSyncer.run() } }
+            // Downloading missing images to filesDir is WorkManager's job — it needs a network
+            // constraint and to keep running with the app closed. See OfflineSyncWorker.
+            OfflineSyncWorker.schedule(appContext)
             // Self-heal videos that were failed by the classifier/transcode race (fixed 2026-07-27).
-            launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { itemRepository.retryFailedVideos() } }
+            launch(kotlinx.coroutines.Dispatchers.IO) {
+                if (settings.claimMaintenanceRun("retry_failed_videos", 6.hours)) {
+                    runCatching { itemRepository.retryFailedVideos() }
+                }
+            }
             runCatching { classifier.run() } // collects the feed; cancels on sign-out
+        } else {
+            // Nothing to sync for a signed-out device, and the worker would otherwise keep waking
+            // every 6h to find no user.
+            OfflineSyncWorker.cancel(appContext)
         }
     }
 
     // Checked once per uid (not a Firestore listener — this is a one-off gate, not something that
-    // needs to react live). null uid = not signed in; the deletion check itself resolving is
-    // tracked separately so the gate below can't flash Home before it's known.
-    var pendingDeletionCheckedFor by remember { mutableStateOf<String?>(null) }
+    // needs to react live). Deliberately does NOT gate the UI: on release builds this get() waits
+    // on an App Check Play Integrity token (~3s cold, forever offline), and blocking rootKey on it
+    // meant every cold start showed a blank Surface for that long. A user mid-deletion sees Home
+    // for a frame instead — the screen below swaps in as soon as the check lands.
     var pendingDeletionRequestedAt by remember { mutableStateOf<java.util.Date?>(null) }
     LaunchedEffect(user?.uid) {
         val uid = user?.uid
         pendingDeletionRequestedAt = if (uid != null) runCatching { auth.pendingDeletionRequestedAt(uid) }.getOrNull() else null
-        pendingDeletionCheckedFor = uid
     }
-    val pendingDeletionKnown = user == null || pendingDeletionCheckedFor == user?.uid
 
     val rootKey: NavKey? = when {
-        onboarded == null || !pendingDeletionKnown -> null
+        onboarded == null -> null
         user == null -> Login
         onboarded == false -> Onboarding
         else -> Home
@@ -292,6 +328,8 @@ fun AppRoot(
 
     val snackbar = remember { SnackbarHostState() }
     val notify = remember { { message: String -> scope.launch { snackbar.showSnackbar(message) }; Unit } }
+    // Writes that nobody awaits (item creation, background uploads) report here — see SyncStatus.
+    LaunchedEffect(Unit) { SyncStatus.failures.collect { snackbar.showSnackbar(it) } }
     CompositionLocalProvider(LocalNotify provides notify) {
       Box(Modifier.fillMaxSize()) {
         SharedTransitionLayout {
@@ -326,6 +364,7 @@ fun AppRoot(
                         embedder = embedder,
                         ingestor = ingestor,
                         videoIngestor = videoIngestor,
+                        audioIngestor = audioIngestor,
                         sharedTransitionScope = this@SharedTransitionLayout,
                         animatedVisibilityScope = LocalNavAnimatedContentScope.current,
                         avatarUrl = user?.photoUrl?.toString(),
@@ -373,11 +412,14 @@ fun AppRoot(
                 entry<SpaceDetail> { key ->
                     SpaceDetailScreen(
                         spaceId = key.spaceId,
+                        userId = user?.uid,
                         itemRepository = itemRepository,
                         spaceRepository = spaceRepository,
                         classifier = classifier,
                         ingestor = ingestor,
                         videoIngestor = videoIngestor,
+                        audioIngestor = audioIngestor,
+                        settings = settings,
                         sharedTransitionScope = this@SharedTransitionLayout,
                         animatedVisibilityScope = LocalNavAnimatedContentScope.current,
                         onOpenItem = { ids, index -> backStack.add(ItemDetail(ids, index, key.spaceId)) },

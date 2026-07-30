@@ -123,7 +123,10 @@ class Classifier(
 
         var page: Page? = null
         var ocrText: String? = null
-        val model = genModel(ANALYSIS_SCHEMA, SYSTEM_PROMPT)
+        // Audio asks for one extra field, so it gets its own schema rather than making `transcript`
+        // an always-present property every other type has to return empty.
+        val schema = if (item.type == ItemType.AUDIO.wire) AUDIO_ANALYSIS_SCHEMA else ANALYSIS_SCHEMA
+        val model = genModel(schema, SYSTEM_PROMPT)
         val response = when (item.type) {
             ItemType.LINK.wire -> {
                 val url = item.url ?: throw IllegalStateException("Link item has no url")
@@ -149,6 +152,14 @@ class Classifier(
                 val bytes = java.io.File(path).readBytes()
                 model.generateContent(content { text(mediaPrompt(isVideo = true, spacesBlock)); inlineData(bytes, "video/mp4") })
             }
+            ItemType.AUDIO.wire -> {
+                // Always a local file written by AudioIngestor — no transcode, so unlike video it's
+                // ready the moment the item exists. Still MediaNotReadyYet rather than a hard failure
+                // if it isn't there: `failed` is terminal, and a retry costs nothing.
+                val path = localMediaPath(item) { java.io.File(it).exists() } ?: throw MediaNotReadyYet()
+                val bytes = java.io.File(path).readBytes()
+                model.generateContent(content { text(audioPrompt(spacesBlock)); inlineData(bytes, "audio/mp4") })
+            }
             else -> throw IllegalStateException("Unsupported type: ${item.type}")
         }
 
@@ -157,6 +168,10 @@ class Classifier(
         val description = json.optString("description").trim()
         val tags = json.optJSONArray("tags").toStringList().map { it.trim().lowercase() }.filter { it.isNotBlank() }
         val spaceNames = json.optJSONArray("spaceNames").toStringList()
+        // Capped like OCR text: a long ramble shouldn't bloat the doc or drown the real fields in
+        // searchText. normalizeOcrText is just whitespace-collapse + truncate, despite the name.
+        val transcript = json.optString("transcript").takeIf { it.isNotBlank() }
+            ?.let { normalizeOcrText(it, MAX_TRANSCRIPT_CHARS) }
         val intents = sanitizeIntents(parseIntents(json.optJSONArray("intents")))
 
         val idByName = dynamic.associateBy({ it.name.trim().lowercase() }, { it.id })
@@ -174,6 +189,7 @@ class Classifier(
             heroImageUrl = if (item.type == ItemType.LINK.wire) page?.heroImageUrl else null,
             aspectRatio = if (item.type == ItemType.LINK.wire) page?.aspectRatio else null,
             ocrText = ocrText,
+            transcript = transcript,
         )
         spaces.suggestSpaces(item.id, spaceIds)
         // Steer any spaces the item was already filed into while it was processing.
@@ -181,7 +197,7 @@ class Classifier(
 
         // Index for on-device semantic search (no-op if the user hasn't enabled it / model absent).
         embedder?.let { e ->
-            val blob = listOf(title, description, tags.joinToString(" "), item.note.orEmpty())
+            val blob = listOf(title, description, tags.joinToString(" "), item.note.orEmpty(), transcript.orEmpty())
                 .filter { it.isNotBlank() }.joinToString(". ")
             e.embed(blob)?.let { runCatching { items.updateEmbedding(item.id, it) } }
         }
@@ -470,6 +486,14 @@ class Classifier(
         INTENTS_PROMPT_BLOCK,
     ).joinToString("\n\n")
 
+    private fun audioPrompt(spacesBlock: String) = listOf(
+        "You are helping organize a save-it-for-later app. This is a voice note the user recorded for themselves. Transcribe it verbatim, then produce a short title naming what it is about, a 1-2 sentence description, 4-8 lowercase tags (one or two words each), and matching space names.",
+        "The transcript is what makes this note findable later, so prefer accuracy over tidiness: keep names, numbers, addresses and times exactly as spoken. If the audio is silent or unintelligible, return an empty transcript and title it 'Voice note'.",
+        "Treat the spoken content as the source for intents — a phone number said aloud should become a call intent, an address an open_maps intent, and so on.",
+        spacesBlock,
+        INTENTS_PROMPT_BLOCK,
+    ).joinToString("\n\n")
+
     /**
      * Loads the image bitmap for AI classification.
      * - If imageUrl is a Cloudinary HTTPS URL (after upload): downloads with w_1024,q_auto
@@ -596,6 +620,21 @@ class Classifier(
                 "intents" to Schema.array(INTENT_SCHEMA),
             ),
         )
+
+        /** [ANALYSIS_SCHEMA] plus the verbatim transcript that makes a voice note searchable. */
+        val AUDIO_ANALYSIS_SCHEMA: Schema = Schema.obj(
+            mapOf(
+                "title" to Schema.string(),
+                "description" to Schema.string(),
+                "tags" to Schema.array(Schema.string()),
+                "spaceNames" to Schema.array(Schema.string()),
+                "intents" to Schema.array(INTENT_SCHEMA),
+                "transcript" to Schema.string(),
+            ),
+        )
+
+        /** Roughly 15 minutes of speech — past this, searchText stops being a useful index. */
+        internal const val MAX_TRANSCRIPT_CHARS = 20_000
 
         val RECOMMEND_SCHEMA: Schema = Schema.obj(mapOf("itemNumbers" to Schema.array(Schema.integer())))
         val STEER_SCHEMA: Schema = Schema.obj(mapOf("intents" to Schema.array(INTENT_SCHEMA)))

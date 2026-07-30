@@ -81,7 +81,7 @@ private val AVATAR_SIZE = 28.dp
 private val AVATAR_OVERLAP = 18.dp
 
 @Composable
-private fun MemberAvatar(url: String?, size: androidx.compose.ui.unit.Dp = AVATAR_SIZE, modifier: Modifier = Modifier) {
+internal fun MemberAvatar(url: String?, size: androidx.compose.ui.unit.Dp = AVATAR_SIZE, modifier: Modifier = Modifier) {
     Surface(
         shape = CircleShape,
         color = MaterialTheme.colorScheme.primaryContainer,

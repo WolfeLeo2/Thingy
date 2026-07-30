@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
 import com.wolfeleo2.thingy.data.Embedder
+import com.wolfeleo2.thingy.data.AudioIngestor
 import com.wolfeleo2.thingy.data.ImageIngestor
 import com.wolfeleo2.thingy.data.ItemRepository
 import com.wolfeleo2.thingy.data.SettingsRepository
@@ -95,6 +96,7 @@ fun MainShell(
     embedder: Embedder,
     ingestor: ImageIngestor,
     videoIngestor: VideoIngestor,
+    audioIngestor: AudioIngestor,
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
     avatarUrl: String?,
@@ -230,6 +232,10 @@ fun MainShell(
                     } 
                 },
                 onOpenCamera = onOpenCamera,
+                audioIngestor = audioIngestor,
+                // Ingesting in MainShell's scope, not the sheet's: the sheet dismisses on the same
+                // tap that stops the recording, and a scope owned by the sheet dies with it.
+                onVoiceRecorded = { scope.launch { runCatching { audioIngestor.stopAndIngest() } } },
                 onDismiss = { showAdd = false },
             )
         }

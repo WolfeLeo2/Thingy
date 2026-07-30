@@ -1,8 +1,14 @@
 package com.wolfeleo2.thingy.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,16 +34,19 @@ import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -45,8 +54,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
 import com.wolfeleo2.thingy.data.Classifier
+import com.wolfeleo2.thingy.data.AudioIngestor
 import com.wolfeleo2.thingy.data.ImageIngestor
 import com.wolfeleo2.thingy.data.ItemRepository
+import com.wolfeleo2.thingy.data.SettingsRepository
+import com.wolfeleo2.thingy.data.SpaceComment
 import com.wolfeleo2.thingy.data.SpaceItemStatus
 import com.wolfeleo2.thingy.data.SpaceRepository
 import com.wolfeleo2.thingy.data.VideoIngestor
@@ -59,11 +71,14 @@ import kotlinx.coroutines.launch
 @Composable
 fun SpaceDetailScreen(
     spaceId: String,
+    userId: String?,
     itemRepository: ItemRepository,
     spaceRepository: SpaceRepository,
     classifier: Classifier,
     ingestor: ImageIngestor,
     videoIngestor: VideoIngestor,
+    audioIngestor: AudioIngestor,
+    settings: SettingsRepository,
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
     onOpenItem: (List<String>, Int) -> Unit,
@@ -83,6 +98,14 @@ fun SpaceDetailScreen(
     var menu by remember { mutableStateOf(false) }
     var showMembers by remember { mutableStateOf(false) }
     var showInvite by remember { mutableStateOf(false) }
+    var showComments by remember { mutableStateOf(false) }
+    val comments by remember(spaceId) { spaceRepository.commentsForSpace(spaceId) }.collectAsStateWithLifecycle(emptyList())
+    val lastSeenCommentAt by remember(spaceId) { settings.lastSeenCommentAt(spaceId) }.collectAsStateWithLifecycle(0L)
+    val unreadComments = remember(comments, lastSeenCommentAt, userId) {
+        unreadComments(comments, userId, lastSeenCommentAt)
+    }
+    // Marking seen uses a real comment's createdAt, never the device clock — see markCommentsSeen.
+    val newestCommentAt = remember(comments) { comments.mapNotNull { it.createdAt?.time }.maxOrNull() }
     var addingToSpaceId by remember { mutableStateOf<String?>(null) }
     var burstTrigger by remember { mutableIntStateOf(0) }
 
@@ -101,6 +124,7 @@ fun SpaceDetailScreen(
                 navigationIcon = { AppBarAction(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", onClick = onBack) },
                 actions = {
                     MemberAvatarStack(members = members, onClick = { showMembers = true })
+                    CommentsAction(count = unreadComments.size, onClick = { showComments = true })
                     if (suggested.isNotEmpty()) {
                         ButtonGroup(
                             overflowIndicator = { menuState -> ButtonGroupDefaults.OverflowIndicator(menuState = menuState) },
@@ -229,6 +253,52 @@ fun SpaceDetailScreen(
                     )
                 }
             }
+            // Teaser for the newest *unread* comment. Deliberately the last unread one rather than
+            // the last comment overall: writing your own comment would otherwise mask an unread one
+            // underneath it and you'd never be told.
+            val teaser = unreadComments.lastOrNull()
+            // Held past the point the teaser goes null, so the pill still has something to draw
+            // while it animates out — otherwise it snaps away and the exit is never seen.
+            var lastTeaser by remember { mutableStateOf<SpaceComment?>(null) }
+            LaunchedEffect(teaser) { if (teaser != null) lastTeaser = teaser }
+            AnimatedVisibility(
+                visible = teaser != null && !showComments,
+                // Springs up from the bottom edge with an overshoot; leaves fast, toward itself.
+                enter = slideInVertically(MaterialTheme.motionScheme.slowSpatialSpec()) { it * 2 } +
+                    scaleIn(MaterialTheme.motionScheme.slowSpatialSpec(), initialScale = 0.8f) +
+                    fadeIn(MaterialTheme.motionScheme.defaultEffectsSpec()),
+                exit = scaleOut(MaterialTheme.motionScheme.fastSpatialSpec(), targetScale = 0.8f) +
+                    fadeOut(MaterialTheme.motionScheme.fastEffectsSpec()),
+                // Bottom-start, wrap width: never reaches the FAB in the opposite corner.
+                modifier = Modifier.align(Alignment.BottomStart).padding(start = 16.dp, bottom = 16.dp, end = 88.dp),
+            ) {
+                lastTeaser?.let { t ->
+                    val seen = { scope.launch { settings.markCommentsSeen(spaceId, t.createdAt?.time ?: 0L) }; Unit }
+                    LatestCommentPill(
+                        comment = t,
+                        // The space's own ambient seed, already persisted for the shelf layout.
+                        seedColor = space?.shelfColor,
+                        onOpen = { showComments = true; seen() },
+                        onDismiss = seen,
+                    )
+                }
+            }
+
+            if (showComments) {
+                SpaceCommentsSheet(
+                    comments = comments,
+                    currentUserId = userId,
+                    isOwner = space?.userId == userId,
+                    onPost = { spaceRepository.postComment(spaceId, it) },
+                    onDelete = { spaceRepository.deleteComment(it.id) },
+                    onDismiss = {
+                        showComments = false
+                        // Reading the thread clears everything in it, not just the newest.
+                        newestCommentAt?.let { scope.launch { settings.markCommentsSeen(spaceId, it) } }
+                    },
+                )
+            }
+
             if (showAdd) {
                 AddSheet(
                     onSaveNote = { text -> scope.launch { itemRepository.createNote(text, spaceId) }; showAdd = false },
@@ -248,6 +318,9 @@ fun SpaceDetailScreen(
                         }
                     },
                     onOpenCamera = onOpenCamera,
+                    audioIngestor = audioIngestor,
+                    // Scoped to this screen, not the sheet — the sheet dismisses on the same tap.
+                    onVoiceRecorded = { scope.launch { runCatching { audioIngestor.stopAndIngest(spaceId) } } },
                     onDismiss = { showAdd = false },
                 )
             }

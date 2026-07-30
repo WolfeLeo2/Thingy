@@ -3,6 +3,7 @@ package com.wolfeleo2.thingy.data
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -11,6 +12,7 @@ import kotlinx.coroutines.flow.map
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.time.Duration
 
 /** Flat snapshot of the item the home-screen widget shows — see [SettingsRepository.widgetCard]. */
 data class WidgetCard(val itemId: String, val title: String, val thumbPath: String?)
@@ -152,5 +154,52 @@ class SettingsRepository(private val context: Context) {
             currentMap.removeAll { it.startsWith("$itemId=") }
             prefs[SNOOZED_ITEMS] = currentMap.joinToString(";")
         }
+    }
+
+    /**
+     * Read cursor for a space's comment thread: the createdAt of the newest comment the user has
+     * seen. 0 means none.
+     *
+     * A timestamp rather than a comment id, so "unread" is a *count* — everything newer than this —
+     * instead of just "is the latest one new". A boolean would be the dismiss-forever bug the
+     * resurfacing notifications already had once; an id can only ever answer the weaker question.
+     */
+    fun lastSeenCommentAt(spaceId: String): Flow<Long> =
+        context.dataStore.data.map { it[lastSeenCommentKey(spaceId)] ?: 0L }
+
+    /**
+     * [upToMillis] must be an actual comment's createdAt, never System.currentTimeMillis(): those
+     * are *server* timestamps, and a device clock running behind the server would mark a comment
+     * seen at a time earlier than its own createdAt, leaving it unread forever.
+     */
+    suspend fun markCommentsSeen(spaceId: String, upToMillis: Long) {
+        context.dataStore.edit { prefs ->
+            val current = prefs[lastSeenCommentKey(spaceId)] ?: 0L
+            // Never move the cursor backwards — a stale snapshot shouldn't un-read anything.
+            if (upToMillis > current) prefs[lastSeenCommentKey(spaceId)] = upToMillis
+        }
+    }
+
+    private fun lastSeenCommentKey(spaceId: String) = longPreferencesKey("last_seen_comment_$spaceId")
+
+    /**
+     * True at most once per [interval] for [task], and stamps the run immediately so it can't
+     * re-fire this launch. Used to keep the startup housekeeping jobs (Cloudinary migration,
+     * offline image sync, one-off backfills) off *every* cold start, where they contend for
+     * network with the first Firestore listener.
+     *
+     * Stamped on claim, not on success, deliberately: a device that's offline would otherwise
+     * retry — and fail slowly — on every single launch, which is the cost being avoided.
+     */
+    suspend fun claimMaintenanceRun(task: String, interval: Duration): Boolean {
+        val key = longPreferencesKey("maintenance_$task")
+        val now = System.currentTimeMillis()
+        var claimed = false
+        context.dataStore.edit { prefs ->
+            val last = prefs[key] ?: 0L
+            claimed = now - last >= interval.inWholeMilliseconds
+            if (claimed) prefs[key] = now
+        }
+        return claimed
     }
 }

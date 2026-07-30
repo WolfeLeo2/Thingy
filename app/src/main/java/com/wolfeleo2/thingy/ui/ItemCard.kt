@@ -22,6 +22,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NorthEast
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -58,6 +60,8 @@ import coil3.request.ImageRequest
 import com.wolfeleo2.thingy.data.Item
 import com.wolfeleo2.thingy.data.ItemStatus
 import com.wolfeleo2.thingy.data.ItemType
+import com.wolfeleo2.thingy.data.formatDuration
+import com.wolfeleo2.thingy.data.syncedMediaExt
 
 /**
  * Returns the best available preview for this item.
@@ -81,18 +85,25 @@ fun Item.heroImageRequest(url: Any): ImageRequest =
 
 /** Non-composable variant of [previewUrl] — resolvable off the composition thread (e.g. from a coroutine). */
 fun Item.previewModel(context: android.content.Context): Any? = when (type) {
-    ItemType.IMAGE.wire, ItemType.VIDEO.wire, ItemType.LINK.wire -> {
-        val native = storagePath?.takeIf { it.startsWith("/") }
-            ?.let { java.io.File(it) }?.takeIf { it.exists() }
-        val ext = if (type == ItemType.VIDEO.wire) "mp4" else "webp"
-        val synced = java.io.File(context.filesDir, "saved/${id}.$ext")
-        val legacy = java.io.File(context.filesDir, "saved/${id}.media")
-        native
-            ?: synced.takeIf { it.exists() }
-            ?: legacy.takeIf { it.exists() }
-            ?: if (type == ItemType.LINK.wire) heroImageUrl else imageUrl
-    }
+    ItemType.IMAGE.wire, ItemType.VIDEO.wire, ItemType.LINK.wire -> mediaSource(context)
+    // Audio has no thumbnail — the detail screen calls [mediaSource] directly to play it.
     else -> null
+}
+
+/**
+ * Where this item's bytes actually live, preferring local: the file this device wrote, then the
+ * offline mirror OfflineImageSyncer pulled down, then the CDN URL. Returns a [java.io.File] or a
+ * String URL — both are things Coil and ExoPlayer accept.
+ */
+fun Item.mediaSource(context: android.content.Context): Any? {
+    val native = storagePath?.takeIf { it.startsWith("/") }
+        ?.let { java.io.File(it) }?.takeIf { it.exists() }
+    val synced = java.io.File(context.filesDir, "saved/${id}.${syncedMediaExt(type)}")
+    val legacy = java.io.File(context.filesDir, "saved/${id}.media")
+    return native
+        ?: synced.takeIf { it.exists() }
+        ?: legacy.takeIf { it.exists() }
+        ?: if (type == ItemType.LINK.wire) heroImageUrl else imageUrl
 }
 
 private fun Item.previewRatio(): Float {
@@ -200,6 +211,21 @@ fun ItemCard(
                         )
                     }
                 }
+                // Not synced yet — saved locally, still queued for the server. Deliberately quiet:
+                // Firestore retries on its own, so this is reassurance, not a call to action.
+                if (item.pendingSync) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.35f),
+                        shape = CircleShape,
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.CloudOff, contentDescription = "Not backed up yet",
+                            tint = Color.White,
+                            modifier = Modifier.padding(4.dp).size(16.dp),
+                        )
+                    }
+                }
                 if (selectionActive) {
                     // Empty ring for unpicked, filled check for picked — the whole grid reads as a
                     // checklist the moment a selection starts.
@@ -292,15 +318,36 @@ private fun ImageFace(item: Item, url: Any, imageShared: Modifier = Modifier) {
 @Composable
 private fun TextFace(item: Item) {
     val isNote = item.type == ItemType.NOTE.wire
+    val isAudio = item.type == ItemType.AUDIO.wire
     Surface(
-        color = if (isNote) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+        color = when {
+            isNote -> MaterialTheme.colorScheme.primaryContainer
+            isAudio -> MaterialTheme.colorScheme.tertiaryContainer
+            else -> MaterialTheme.colorScheme.surfaceVariant
+        },
         shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth(),
     ) {
-        Text(
-            text = item.note ?: item.title ?: item.url ?: "…",
-            style = MaterialTheme.typography.bodyLarge, maxLines = 6, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(16.dp),
-        )
+        if (isAudio) {
+            // A voice note has no thumbnail, so the mic and the duration are what make it
+            // recognizable at a glance; the transcript is too long to preview usefully here.
+            Row(
+                Modifier.padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Mic, contentDescription = "Voice note")
+                Text(
+                    item.durationMillis?.let { formatDuration(it) } ?: "Voice note",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
+        } else {
+            Text(
+                text = item.note ?: item.title ?: item.url ?: "…",
+                style = MaterialTheme.typography.bodyLarge, maxLines = 6, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(16.dp),
+            )
+        }
     }
 }
 
