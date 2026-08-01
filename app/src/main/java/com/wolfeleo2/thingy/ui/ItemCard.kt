@@ -54,6 +54,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
@@ -106,7 +107,19 @@ fun Item.mediaSource(context: android.content.Context): Any? {
         ?: if (type == ItemType.LINK.wire) heroImageUrl else imageUrl
 }
 
-private fun Item.previewRatio(): Float {
+/**
+ * The framed image's chrome. Fixed dp suits the feed, where a card is always about a column wide.
+ * The canvas draws the same card at any size, and absolute chrome on a shrunken card reads as a
+ * thick clumsy border — so [ImageFace] takes these as overridable defaults rather than baking them
+ * in, and the canvas passes them scaled. Everything else (inner radius, video badge) derives from
+ * the frame, so there's one number to change.
+ */
+internal val ImageFaceFrame = 4.dp
+internal val ImageFaceCorner = 12.dp
+internal val ImageFaceElevation = 2.dp
+
+// internal (not private): the canvas sizes its cards from the same ratio the feed lays out with.
+internal fun Item.previewRatio(): Float {
     val default = if (type == ItemType.LINK.wire) 1.91f else 1f
     return (aspectRatio?.toFloat() ?: default).coerceIn(0.5f, 2.0f)
 }
@@ -278,34 +291,43 @@ fun ItemCard(
 }
 
 @Composable
-private fun ImageFace(item: Item, url: Any, imageShared: Modifier = Modifier) {
+internal fun ImageFace(
+    item: Item,
+    url: Any,
+    imageShared: Modifier = Modifier,
+    frame: Dp = ImageFaceFrame,
+    corner: Dp = ImageFaceCorner,
+    elevation: Dp = ImageFaceElevation,
+) {
     if (item.sticker == true) {
         AsyncImage(model = item.feedImageRequest(url), contentDescription = item.title, contentScale = ContentScale.Fit,
             modifier = Modifier
                 .fillMaxWidth()
                 .then(imageShared))
     } else {
-        Surface(color = Color.White, shadowElevation = 2.dp, shape = RoundedCornerShape(12.dp),
+        // Concentric: the inner radius sits half a frame inside the outer one (12dp/4dp → 10dp).
+        val innerCorner = (corner - frame / 2).coerceAtLeast(0.dp)
+        Surface(color = Color.White, shadowElevation = elevation, shape = RoundedCornerShape(corner),
             modifier = Modifier.fillMaxWidth().then(imageShared)) {
             Box {
                 AsyncImage(model = item.feedImageRequest(url), contentDescription = item.title, contentScale = ContentScale.Crop,
-                    modifier = Modifier.padding(4.dp).clip(RoundedCornerShape(10.dp))
+                    modifier = Modifier.padding(frame).clip(RoundedCornerShape(innerCorner))
                         .fillMaxWidth().aspectRatio(item.previewRatio()))
 
                 if (item.type == ItemType.VIDEO.wire) {
                     Box(
-                        Modifier.matchParentSize().padding(12.dp),
+                        Modifier.matchParentSize().padding(frame * 3),
                         contentAlignment = Alignment.TopEnd
                     ) {
                         Surface(
                             color = Color.Black.copy(alpha = 0.6f),
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(corner)
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                                modifier = Modifier.padding(horizontal = frame * 1.5f, vertical = frame),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Rounded.PlayArrow, contentDescription = "Play", tint = Color.White, modifier = Modifier.size(14.dp))
+                                Icon(Icons.Rounded.PlayArrow, contentDescription = "Play", tint = Color.White, modifier = Modifier.size(frame * 3.5f))
                             }
                         }
                     }
@@ -316,7 +338,7 @@ private fun ImageFace(item: Item, url: Any, imageShared: Modifier = Modifier) {
 }
 
 @Composable
-private fun TextFace(item: Item) {
+internal fun TextFace(item: Item) {
     val isNote = item.type == ItemType.NOTE.wire
     val isAudio = item.type == ItemType.AUDIO.wire
     Surface(

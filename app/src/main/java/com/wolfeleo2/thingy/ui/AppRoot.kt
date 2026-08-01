@@ -51,6 +51,7 @@ import com.wolfeleo2.thingy.data.SpaceShortcuts
 import com.wolfeleo2.thingy.data.SyncStatus
 import com.wolfeleo2.thingy.data.VideoIngestor
 import com.wolfeleo2.thingy.nav.Camera
+import com.wolfeleo2.thingy.nav.Canvas
 import com.wolfeleo2.thingy.nav.Home
 import com.wolfeleo2.thingy.nav.ItemDetail
 import com.wolfeleo2.thingy.nav.Login
@@ -61,6 +62,7 @@ import com.wolfeleo2.thingy.nav.PrivacyPolicy
 import com.wolfeleo2.thingy.nav.Settings
 import com.wolfeleo2.thingy.nav.SpaceDetail
 import com.wolfeleo2.thingy.ui.auth.LoginScreen
+import com.wolfeleo2.thingy.ui.canvas.CanvasScreen
 import com.wolfeleo2.thingy.ui.camera.CameraScreen
 import com.wolfeleo2.thingy.ui.onboarding.OnboardingScreen
 import kotlinx.coroutines.flow.map
@@ -372,6 +374,7 @@ fun AppRoot(
                         onOpenSpace = { backStack.add(SpaceDetail(it)) },
                         onOpenSettings = { backStack.add(Settings) },
                         onOpenMap = { backStack.add(Map) },
+                        onOpenCanvas = { backStack.add(Canvas) },
                         onOpenSpaceSettings = { backStack.add(NewSpace(it)) },
                         onOpenCamera = { backStack.add(Camera()) },
                     )
@@ -391,6 +394,18 @@ fun AppRoot(
                     MapScreen(
                         library = library,
                         onOpenItem = { ids, index, disableShared -> backStack.add(ItemDetail(ids, index, disableSharedTransition = disableShared)) },
+                        onBack = onBack,
+                    )
+                }
+                entry<Canvas> {
+                    CanvasScreen(
+                        library = library,
+                        // Unlike Map, the canvas's cards *are* the framed image, so they morph into
+                        // the detail hero properly — no disableSharedTransition needed. Home isn't
+                        // composed while Canvas is on top, so the shared keys can't collide.
+                        sharedTransitionScope = this@SharedTransitionLayout,
+                        animatedVisibilityScope = LocalNavAnimatedContentScope.current,
+                        onOpenItem = { ids, index -> backStack.add(ItemDetail(ids, index)) },
                         onBack = onBack,
                     )
                 }

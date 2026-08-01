@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.ScatterPlot
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Style
 import androidx.compose.material3.AlertDialog
@@ -104,6 +105,7 @@ fun MainShell(
     onOpenSpace: (String) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenMap: () -> Unit,
+    onOpenCanvas: () -> Unit,
     onOpenSpaceSettings: (String?) -> Unit,
     onOpenCamera: () -> Unit,
 ) {
@@ -137,6 +139,7 @@ fun MainShell(
             TopAppBar(
                 title = { Text(tab.let { if (it == Tab.HOME) "Thingy" else it.label }, fontWeight = FontWeight.ExtraBold) },
                 actions = { 
+                    IconButton(onClick = onOpenCanvas) { Icon(Icons.Filled.ScatterPlot, contentDescription = "Canvas") }
                     IconButton(onClick = onOpenMap) { Icon(Icons.Filled.Map, contentDescription = "Map") }
                     AvatarButton(url = avatarUrl, onClick = onOpenSettings, modifier = Modifier.padding(end = 8.dp)) 
                 },

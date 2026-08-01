@@ -10,6 +10,7 @@ data object Onboarding : NavKey
 data object Home : NavKey
 data object Settings : NavKey
 data object Map : NavKey
+data object Canvas : NavKey
 data object PrivacyPolicy : NavKey
 
 data class ItemDetail(val itemIds: List<String>, val startIndex: Int, val spaceId: String? = null, val disableSharedTransition: Boolean = false) : NavKey
