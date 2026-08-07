@@ -148,16 +148,17 @@ class Classifier(
                 // patches it to a real file. That's not a failure — it's "not yet". Failing here is
                 // what made every shared video end up `failed`: the retries (~6s) always lost the race
                 // against a transcode, and `failed` is terminal.
-                val path = localMediaPath(item) { java.io.File(it).exists() } ?: throw MediaNotReadyYet()
-                val bytes = java.io.File(path).readBytes()
+                val bytes = loadMediaBytes(item) ?: throw MediaNotReadyYet()
+                // ponytail: mime is assumed mp4 because every producer today writes mp4/m4a. A client
+                // that uploads webm needs the mime derived from the URL — or, cheaper, Cloudinary
+                // asked to deliver an mp4 variant.
                 model.generateContent(content { text(mediaPrompt(isVideo = true, spacesBlock)); inlineData(bytes, "video/mp4") })
             }
             ItemType.AUDIO.wire -> {
                 // Always a local file written by AudioIngestor — no transcode, so unlike video it's
                 // ready the moment the item exists. Still MediaNotReadyYet rather than a hard failure
                 // if it isn't there: `failed` is terminal, and a retry costs nothing.
-                val path = localMediaPath(item) { java.io.File(it).exists() } ?: throw MediaNotReadyYet()
-                val bytes = java.io.File(path).readBytes()
+                val bytes = loadMediaBytes(item) ?: throw MediaNotReadyYet()
                 model.generateContent(content { text(audioPrompt(spacesBlock)); inlineData(bytes, "audio/mp4") })
             }
             else -> throw IllegalStateException("Unsupported type: ${item.type}")
@@ -520,6 +521,37 @@ class Classifier(
     }
 
     /**
+     * The raw bytes of a video/audio item for an inline Gemini request.
+     *
+     * Local file first — it's free and it's the common case on the device that saved the item.
+     * Falling back to the CDN copy is what lets media this device never held locally still get
+     * classified: an item saved from another client, or one whose local file went away with a
+     * reinstall. Without that fallback [localMediaPath] returns null forever, [MediaNotReadyYet]
+     * never clears, and the item retries on every single feed snapshot for good.
+     *
+     * Returns null only for "no copy anywhere yet" — the genuine mid-transcode case.
+     */
+    private suspend fun loadMediaBytes(item: Item): ByteArray? = withContext(Dispatchers.IO) {
+        localMediaPath(item) { java.io.File(it).exists() }?.let {
+            return@withContext java.io.File(it).readBytes()
+        }
+        val url = remoteMediaUrl(item) ?: return@withContext null
+        val conn = (URL(url).openConnection() as HttpURLConnection)
+        try {
+            // Checked before reading the body so an oversized file costs one round trip, not a
+            // 100MB download repeated once per retry.
+            val declared = conn.contentLengthLong
+            check(declared <= MAX_INLINE_BYTES) { "Media too large to classify: $declared bytes" }
+            val bytes = conn.inputStream.use { it.readBytes() }
+            // Defensive: a missing or lying Content-Length must not get us past the cap.
+            check(bytes.size <= MAX_INLINE_BYTES) { "Media too large to classify: ${bytes.size} bytes" }
+            bytes
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /**
      * Reads any text in the image (screenshots, signs, receipts) so it lands in the item's
      * searchText. Best-effort: OCR failing must never fail the classification, and an image with
      * no text returns null rather than an empty field.
@@ -653,6 +685,24 @@ internal class MediaNotReadyYet : Exception("Media not ready yet")
  */
 internal fun localMediaPath(item: Item, exists: (String) -> Boolean): String? =
     item.storagePath?.takeIf { it.startsWith("/") && exists(it) }
+
+/**
+ * The CDN copy of an item's media, if one exists yet.
+ *
+ * `imageUrl` holds the local path (or, for a freshly-picked video, the `content://` URI) until the
+ * background Cloudinary upload lands and patches it, so "starts with http" is exactly what separates
+ * a fetchable remote copy from a not-yet-uploaded local one. That distinction is what keeps the
+ * mid-transcode case reporting [MediaNotReadyYet] instead of trying to download a `content://` URI.
+ */
+internal fun remoteMediaUrl(item: Item): String? =
+    item.imageUrl?.takeIf { it.startsWith("http") }
+
+/**
+ * Gemini rejects an inline request over ~20MB, so a file bigger than this can never be classified
+ * by this path and downloading it would only waste the user's data (and risk an OOM). Held a little
+ * under the limit to leave room for the prompt itself.
+ */
+internal const val MAX_INLINE_BYTES = 18L * 1024 * 1024
 
 private val WHITESPACE_RUN = Regex("\\s+")
 

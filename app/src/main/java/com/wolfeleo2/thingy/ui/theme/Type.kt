@@ -9,30 +9,30 @@ import com.wolfeleo2.thingy.R
 
 // Nunito Sans is a variable font; map each weight to its `wght` axis so the type
 // scale's per-role weights render correctly from the single ttf.
-private fun ns(weight: Int) = Font(
-    R.font.nunito_sans,
+private fun gsf(weight: Int) = Font(
+    R.font.google_sans_flex,
     weight = FontWeight(weight),
     variationSettings = FontVariation.Settings(FontVariation.weight(weight)),
 )
 
-val NunitoSans = FontFamily(ns(300), ns(400), ns(500), ns(600), ns(700))
+val GoogleSansFlex = FontFamily(gsf(300), gsf(400), gsf(500), gsf(600), gsf(700))
 
 // Keep the Expressive type scale (sizes/weights/emphasized styles); swap only the typeface.
 private val base = Typography()
 val AppTypography = base.copy(
-    displayLarge = base.displayLargeEmphasized.copy(fontFamily = NunitoSans),
-    displayMedium = base.displayMediumEmphasized.copy(fontFamily = NunitoSans),
-    displaySmall = base.displaySmallEmphasized.copy(fontFamily = NunitoSans),
-    headlineLarge = base.headlineLargeEmphasized.copy(fontFamily = NunitoSans),
-    headlineMedium = base.headlineMediumEmphasized.copy(fontFamily = NunitoSans),
-    headlineSmall = base.headlineSmallEmphasized.copy(fontFamily = NunitoSans),
-    titleLarge = base.titleLargeEmphasized.copy(fontFamily = NunitoSans),
-    titleMedium = base.titleMediumEmphasized.copy(fontFamily = NunitoSans),
-    titleSmall = base.titleSmallEmphasized.copy(fontFamily = NunitoSans),
-    bodyLarge = base.bodyLargeEmphasized.copy(fontFamily = NunitoSans),
-    bodyMedium = base.bodyMediumEmphasized.copy(fontFamily = NunitoSans),
-    bodySmall = base.bodySmallEmphasized.copy(fontFamily = NunitoSans),
-    labelLarge = base.labelLargeEmphasized.copy(fontFamily = NunitoSans),
-    labelMedium = base.labelMediumEmphasized.copy(fontFamily = NunitoSans),
-    labelSmall = base.labelSmallEmphasized.copy(fontFamily = NunitoSans),
+    displayLarge = base.displayLargeEmphasized.copy(fontFamily = GoogleSansFlex),
+    displayMedium = base.displayMediumEmphasized.copy(fontFamily = GoogleSansFlex),
+    displaySmall = base.displaySmallEmphasized.copy(fontFamily = GoogleSansFlex),
+    headlineLarge = base.headlineLargeEmphasized.copy(fontFamily = GoogleSansFlex),
+    headlineMedium = base.headlineMediumEmphasized.copy(fontFamily = GoogleSansFlex),
+    headlineSmall = base.headlineSmallEmphasized.copy(fontFamily = GoogleSansFlex),
+    titleLarge = base.titleLargeEmphasized.copy(fontFamily = GoogleSansFlex),
+    titleMedium = base.titleMediumEmphasized.copy(fontFamily = GoogleSansFlex),
+    titleSmall = base.titleSmallEmphasized.copy(fontFamily = GoogleSansFlex),
+    bodyLarge = base.bodyLargeEmphasized.copy(fontFamily = GoogleSansFlex),
+    bodyMedium = base.bodyMediumEmphasized.copy(fontFamily = GoogleSansFlex),
+    bodySmall = base.bodySmallEmphasized.copy(fontFamily = GoogleSansFlex),
+    labelLarge = base.labelLargeEmphasized.copy(fontFamily = GoogleSansFlex),
+    labelMedium = base.labelMediumEmphasized.copy(fontFamily = GoogleSansFlex),
+    labelSmall = base.labelSmallEmphasized.copy(fontFamily = GoogleSansFlex),
 )

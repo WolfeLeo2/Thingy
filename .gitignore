@@ -17,6 +17,6 @@ build/
 .claude/
 .agents/
 .tokensave/
-sort_inspo
+sort_inspo/
 
 node_modules/
