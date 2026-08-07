@@ -12,6 +12,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -34,10 +35,12 @@ import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -45,9 +48,11 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -109,16 +114,28 @@ fun SpaceDetailScreen(
     var addingToSpaceId by remember { mutableStateOf<String?>(null) }
     var burstTrigger by remember { mutableIntStateOf(0) }
 
+    var typeFilter by rememberSaveable { mutableStateOf(TypeFilter.ALL) }
+    var sortField by rememberSaveable { mutableStateOf(SortField.DATE_SAVED) }
+    var sortAscending by rememberSaveable { mutableStateOf(false) }
+    val topBarScrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
+
     val itemById = items.associateBy { it.id }
     // saved (or legacy absent) first, then suggestions.
     val live = memberships.filter { it.status != SpaceItemStatus.DISMISSED.wire }
     val saved = live.filter { it.status != SpaceItemStatus.SUGGESTED.wire }.mapNotNull { m -> itemById[m.itemId]?.let { m to it } }
     val suggested = live.filter { it.status == SpaceItemStatus.SUGGESTED.wire }.mapNotNull { m -> itemById[m.itemId]?.let { m to it } }
-    val ordered = saved + suggested
+    // Applied per group, not across the whole list: suggestions stay pinned after the saved items
+    // however you sort, rather than scattering among them.
+    val ordered = remember(saved, suggested, typeFilter, sortField, sortAscending) {
+        saved.filterSort(typeFilter, sortField, sortAscending) +
+            suggested.filterSort(typeFilter, sortField, sortAscending)
+    }
     val ids = ordered.map { it.second.id }
 
     Scaffold(
+        modifier = Modifier.nestedScroll(topBarScrollBehavior.nestedScrollConnection),
         topBar = {
+          Column {
             TopAppBar(
                 title = { Text(space?.name ?: "Space", fontWeight = FontWeight.ExtraBold) },
                 navigationIcon = { AppBarAction(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", onClick = onBack) },
@@ -205,13 +222,35 @@ fun SpaceDetailScreen(
                         }
                     }
                 },
+                scrollBehavior = topBarScrollBehavior,
             )
+            FilterSortBar(
+                filter = typeFilter,
+                onFilter = { typeFilter = it },
+                field = sortField,
+                ascending = sortAscending,
+                onSort = { f, asc -> sortField = f; sortAscending = asc },
+            )
+          }
         },
         floatingActionButton = {
             FloatingActionButton(onClick = { showAdd = true }) { Icon(Icons.Filled.Add, "Add to space") }
         },
     ) { padding ->
         Box(Modifier.fillMaxSize()) {
+            // Only shown when a filter is what emptied the grid — an genuinely empty space keeps
+            // its existing (blank) treatment rather than gaining one as a side effect of this change.
+            if (ordered.isEmpty() && typeFilter != TypeFilter.ALL) {
+                ThingyEmptyState(
+                    shape = MaterialShapes.Cookie9Sided,
+                    icon = typeFilter.icon,
+                    title = typeFilter.emptyMessage,
+                    message = "Nothing in this shelf matches this filter.",
+                    actionLabel = "Show all",
+                    onAction = { typeFilter = TypeFilter.ALL },
+                    modifier = Modifier.padding(padding),
+                )
+            }
             LazyVerticalStaggeredGrid(
                 columns = StaggeredGridCells.Fixed(2),
                 contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 88.dp),

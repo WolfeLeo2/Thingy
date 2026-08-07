@@ -11,6 +11,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -44,6 +45,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -120,6 +122,11 @@ fun MainShell(
     // Home multi-select (long-press to start). Lives here so the floating toolbar can morph into the
     // contextual action bar — it's drawn above the tab content, so a bar inside HomeFeed would be buried.
     val selectedIds = remember { mutableStateSetOf<String>() }
+    // Home's type lens + ordering. Hoisted for the same reason as selectedIds: the bar renders in
+    // this Scaffold's topBar slot, while the grid it filters lives down in the content slot.
+    var typeFilter by rememberSaveable { mutableStateOf(TypeFilter.ALL) }
+    var sortField by rememberSaveable { mutableStateOf(SortField.DATE_SAVED) }
+    var sortAscending by rememberSaveable { mutableStateOf(false) }
     var confirmBulkDelete by remember { mutableStateOf(false) }
     var addingSelectionToSpace by remember { mutableStateOf(false) }
     val stateHolder = rememberSaveableStateHolder()
@@ -129,21 +136,41 @@ fun MainShell(
     val scrollBehavior = FloatingToolbarDefaults.exitAlwaysScrollBehavior(
         exitDirection = FloatingToolbarExitDirection.Bottom, // toolbar exits downward off-screen
     )
+    // Independent of the toolbar behavior above: retracts the title bar on scroll so the filter bar
+    // below it ends up pinned against the status bar. Both connections see the same gesture.
+    val topBarScrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
     // A selection is Home's alone — switching tabs drops it rather than leaving a stale count.
     LaunchedEffect(tab) { if (tab != Tab.HOME) selectedIds.clear() }
+    // Selecting items then filtering them out of view would leave bulk-delete acting on things the
+    // user can no longer see. Same guard as the tab switch above.
+    LaunchedEffect(typeFilter, sortField, sortAscending) { selectedIds.clear() }
     BackHandler(enabled = selectedIds.isNotEmpty()) { selectedIds.clear() }
 
     Scaffold(
-        modifier = Modifier.nestedScroll(scrollBehavior),
+        modifier = Modifier
+            .nestedScroll(scrollBehavior)
+            .nestedScroll(topBarScrollBehavior.nestedScrollConnection),
         topBar = {
-            TopAppBar(
-                title = { Text(tab.let { if (it == Tab.HOME) "Thingy" else it.label }, fontWeight = FontWeight.ExtraBold) },
-                actions = { 
-                    IconButton(onClick = onOpenCanvas) { Icon(Icons.Filled.ScatterPlot, contentDescription = "Canvas") }
-                    IconButton(onClick = onOpenMap) { Icon(Icons.Filled.Map, contentDescription = "Map") }
-                    AvatarButton(url = avatarUrl, onClick = onOpenSettings, modifier = Modifier.padding(end = 8.dp)) 
-                },
-            )
+            Column {
+                TopAppBar(
+                    title = { Text(tab.let { if (it == Tab.HOME) "Thingy" else it.label }, fontWeight = FontWeight.ExtraBold) },
+                    actions = {
+                        IconButton(onClick = onOpenCanvas) { Icon(Icons.Filled.ScatterPlot, contentDescription = "Canvas") }
+                        IconButton(onClick = onOpenMap) { Icon(Icons.Filled.Map, contentDescription = "Map") }
+                        AvatarButton(url = avatarUrl, onClick = onOpenSettings, modifier = Modifier.padding(end = 8.dp))
+                    },
+                    scrollBehavior = topBarScrollBehavior,
+                )
+                if (tab == Tab.HOME) {
+                    FilterSortBar(
+                        filter = typeFilter,
+                        onFilter = { typeFilter = it },
+                        field = sortField,
+                        ascending = sortAscending,
+                        onSort = { f, asc -> sortField = f; sortAscending = asc },
+                    )
+                }
+            }
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
@@ -156,6 +183,10 @@ fun MainShell(
                         onAddToSpace = { addingToSpaceId = it },
                         selectedIds = selectedIds,
                         onToggleSelect = { id -> if (!selectedIds.add(id)) selectedIds.remove(id) },
+                        filter = typeFilter,
+                        sortField = sortField,
+                        sortAscending = sortAscending,
+                        onClearFilter = { typeFilter = TypeFilter.ALL },
                     )
                     Tab.SPACES -> {
                         if (spacesLayout == SpacesLayout.SHELF) {

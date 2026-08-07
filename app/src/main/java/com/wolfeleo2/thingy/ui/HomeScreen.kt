@@ -7,8 +7,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.staggeredgrid.itemsIndexed
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.SnackbarDuration
@@ -54,6 +52,11 @@ internal fun HomeFeed(
     // can morph into the contextual action bar.
     selectedIds: Set<String>,
     onToggleSelect: (String) -> Unit,
+    // The lens itself is owned by MainShell, where the bar that drives it is drawn.
+    filter: TypeFilter,
+    sortField: SortField,
+    sortAscending: Boolean,
+    onClearFilter: () -> Unit,
 ) {
     val context = LocalContext.current
     val items by library.items.collectAsStateWithLifecycle()
@@ -69,13 +72,21 @@ internal fun HomeFeed(
         ReminderManager.scheduleDailyResurface(context)
     }
 
-    val list = items ?: return // loading — blank for the frame before the cache resolves
+    val all = items ?: return // loading — blank for the frame before the cache resolves
+    val list = remember(all, filter, sortField, sortAscending) {
+        applyFilterSort(all, filter, sortField, sortAscending)
+    }
     if (list.isEmpty()) {
+        // A filter that matches nothing must not look like a lost library, so it says which lens is
+        // on and offers the way back out.
+        val filtered = filter != TypeFilter.ALL
         ThingyEmptyState(
             shape = MaterialShapes.Cookie9Sided,
-            icon = Icons.Filled.GridView,
-            title = "Nothing saved yet",
-            message = "Everything lands in one calm feed.",
+            icon = filter.icon,
+            title = filter.emptyMessage,
+            message = if (filtered) "Nothing here matches this filter." else "Everything lands in one calm feed.",
+            actionLabel = if (filtered) "Show all" else null,
+            onAction = if (filtered) onClearFilter else null,
         )
         return
     }
